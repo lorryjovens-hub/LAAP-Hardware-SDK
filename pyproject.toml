@@ -1,0 +1,14 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "laap-hardware-sdk"
+version = "0.1.0"
+description = "让任何硬件设备成为 LAAP 数字生命体的躯体"
+readme = "README.md"
+license = {file = "LICENSE"}
+requires-python = ">=3.9"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/laap_hardware"]
