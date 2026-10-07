@@ -1,4 +1,6 @@
 <div align="center">
+<img width="1050" height="702" alt="68ea680aa03aa3db6f723cbb4d0f9030" src="https://github.com/user-attachments/assets/c05efd49-a96a-4184-a0a9-109314e3ee63" />
+<img width="2520" height="1842" alt="92a0d566b0f35018f3e5eea594db1ba7" src="https://github.com/user-attachments/assets/68efb54e-653d-4e92-94c2-c368a57e5565" />
 
 # 🧠 LAAP Hardware SDK
 
