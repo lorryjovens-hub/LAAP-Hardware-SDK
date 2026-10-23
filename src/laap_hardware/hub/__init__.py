@@ -29,6 +29,37 @@ from laaper.hub.hub import (
     NodeTransport,
     TriNodeHub,
 )
+from laaper.hub.llm_planner import (
+    LLMConfig,
+    LLMClient,
+    LLMPlanner,
+    Plan,
+    PlanStep,
+    DeepSeekComputerUse,
+    CUResult,
+    HybridVisionStrategy,
+    detect_llm_config,
+    get_llm_status,
+)
+from laaper.hub.transport import (
+    TransportMode,
+    MessageKind,
+    MessageEnvelope,
+    TransportConfig,
+    TransportStats,
+    IdempotencyCache,
+    NodeConnection,
+    TransportManager,
+    get_transport_design,
+    get_transport_status,
+)
+from laaper.hub.android_node import (
+    AndroidBridge,
+    AndroidDeviceInfo,
+    find_adb,
+    register_android_node,
+    get_android_status,
+)
 
 __all__ = [
     # 节点
@@ -58,4 +89,32 @@ __all__ = [
     "CrossNodeTask",
     "NodeTransport",
     "TriNodeHub",
+    # LLM 规划
+    "LLMConfig",
+    "LLMClient",
+    "LLMPlanner",
+    "Plan",
+    "PlanStep",
+    "DeepSeekComputerUse",
+    "CUResult",
+    "HybridVisionStrategy",
+    "detect_llm_config",
+    "get_llm_status",
+    # 传输
+    "TransportMode",
+    "MessageKind",
+    "MessageEnvelope",
+    "TransportConfig",
+    "TransportStats",
+    "IdempotencyCache",
+    "NodeConnection",
+    "TransportManager",
+    "get_transport_design",
+    "get_transport_status",
+    # Android
+    "AndroidBridge",
+    "AndroidDeviceInfo",
+    "find_adb",
+    "register_android_node",
+    "get_android_status",
 ]
