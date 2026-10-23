@@ -78,6 +78,28 @@ from laaper.hub.voice_computer import (
     register_computer_use_handlers,
     get_voice_computer_status,
 )
+from laaper.hub.multi_step import (
+    VerifyLevel,
+    StepResult,
+    TaskRun,
+    MultiStepComputerAgent,
+    register_multistep_handlers,
+)
+from laaper.hub.action_journal import (
+    Undoability,
+    ActionRecord,
+    UndoResult,
+    ActionJournal,
+    SafetyPolicy,
+    classify_undoability,
+    register_journal_handlers,
+)
+from laaper.hub.xiaozhi_voice_link import (
+    COMPUTER_TOOLS,
+    LinkStats,
+    XiaozhiVoiceLink,
+    quick_start,
+)
 
 __all__ = [
     # 节点
@@ -151,4 +173,23 @@ __all__ = [
     "VoiceComputerAgent",
     "register_computer_use_handlers",
     "get_voice_computer_status",
+    # 多步任务
+    "VerifyLevel",
+    "StepResult",
+    "TaskRun",
+    "MultiStepComputerAgent",
+    "register_multistep_handlers",
+    # 动作日志 + 撤销
+    "Undoability",
+    "ActionRecord",
+    "UndoResult",
+    "ActionJournal",
+    "SafetyPolicy",
+    "classify_undoability",
+    "register_journal_handlers",
+    # 小智语音直连
+    "COMPUTER_TOOLS",
+    "LinkStats",
+    "XiaozhiVoiceLink",
+    "quick_start",
 ]

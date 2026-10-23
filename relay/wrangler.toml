@@ -2,6 +2,16 @@ name = "laap-relay"
 main = "src/index.ts"
 compatibility_date = "2024-09-23"
 
+# 自定义域名（必须在 [vars] 之前，否则 TOML 会把它当成 vars 的子键）
+# api.laap.cn 在同一个 Cloudflare 账号下时，deploy 会自动绑定 DNS 和证书
+routes = [
+  { pattern = "api.laap.cn", custom_domain = true }
+]
+
+# 保留 workers.dev 作为备用通道（自定义域名出问题时的降级路径）
+workers_dev = true
+preview_urls = true
+
 # Durable Objects：按 user_id 分片的 WebSocket 会合点
 [[durable_objects.bindings]]
 name = "LAAP_HUB"
@@ -14,11 +24,8 @@ new_sqlite_classes = ["LAAPHubRoom"]
 [vars]
 ENVIRONMENT = "production"
 
-# 路由到 api.laap.cn/ws
-# 注意：需要先在 Cloudflare 面板把这个 Worker 绑定到 api.laap.cn 这个域名
-
 [observability]
 enabled = true
 
-# 注意：JWT_SECRET 不要写在这里，用 secret 命令设置：
+# JWT_SECRET 不写在这里，用 secret 命令设置：
 #   wrangler secret put JWT_SECRET

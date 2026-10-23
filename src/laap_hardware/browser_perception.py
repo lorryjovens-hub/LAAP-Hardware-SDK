@@ -217,8 +217,44 @@ class VisionClient:
                         f"视觉模型失败 {resp.status_code}: {resp.text[:300]}"
                     )
                     return ""
+
                 data = resp.json()
-                return data["choices"][0]["message"]["content"]
+
+                # 容错解析：
+                # - 部分推理模型会先写 reasoning，content 可能为空甚至缺失
+                # - 部分兼容接口返回结构有差异
+                try:
+                    choices = data.get("choices") or []
+                    if not choices:
+                        logger.error(
+                            f"视觉模型无 choices: "
+                            f"{json.dumps(data, ensure_ascii=False)[:300]}"
+                        )
+                        return ""
+
+                    message = choices[0].get("message") or {}
+                    content = message.get("content")
+
+                    if content:
+                        return content
+
+                    # content 空，试试 reasoning
+                    reasoning = message.get("reasoning")
+                    if reasoning:
+                        logger.debug("视觉模型只返回 reasoning，用它代替")
+                        return reasoning
+
+                    # 都没有
+                    logger.error(
+                        f"视觉模型返回空内容 "
+                        f"(finish_reason={choices[0].get('finish_reason')})"
+                    )
+                    return ""
+
+                except Exception as parse_err:
+                    logger.error(f"响应解析失败: {parse_err}")
+                    return ""
+
         except Exception as e:
             logger.error(f"视觉调用异常: {e}")
             return ""

@@ -290,11 +290,6 @@ class ElementLocator:
         return None, "not_found"
 
     def list_interactive(self, limit: int = 30) -> List[ScreenElement]:
-        """列出当前窗口的可交互元素
-
-        给她一个"菜单"，让她知道屏幕上能点什么。
-        用原生搜索，比递归快得多。
-        """
         uia = self._get_uia()
         if not uia:
             return []
@@ -790,9 +785,18 @@ class VoiceComputerAgent:
     # ── 辅助 ──────────────────────────────────
 
     def _r2d(self, r: CUActionResult) -> Dict:
+        # 注意：CUAction 继承自 str，isinstance(x, str) 会是 True
+        # 所以要先用 Enum 判断，否则会把枚举对象直接传出去
+        from enum import Enum
+        act = r.action
+        if isinstance(act, Enum):
+            act = act.value
+        elif not isinstance(act, str):
+            act = str(act)
+
         return {
             "success": r.success,
-            "action": r.action if isinstance(r.action, str) else r.action.value,
+            "action": act,
             "message": r.message,
             "error": r.error,
             "data": r.data,

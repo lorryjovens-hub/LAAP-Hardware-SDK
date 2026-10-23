@@ -400,6 +400,89 @@ class ComputerUse:
             pass
         return None
 
+    def _is_window_visible_at(self, hwnd: int, x: int, y: int) -> bool:
+        """检查某个坐标上真的是目标窗口
+
+        ## 为什么必须查这个
+
+        SetForegroundWindow 会报成功，但它只管"逻辑前台"，
+        不代表窗口真的画在上面。
+
+        Windows 前台锁、全屏应用、被别的窗口遮住都会导致：
+          API 说成功 → 实际你看不到 → 截图截到别的窗口
+
+        用 WindowFromPoint 查那个坐标上到底是哪个窗口，才是真相。
+        """
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            user32 = ctypes.windll.user32
+
+            class POINT(ctypes.Structure):
+                _fields_ = [("x", ctypes.c_long), ("y", ctypes.c_long)]
+
+            pt = POINT(int(x), int(y))
+            hwnd_at_point = user32.WindowFromPoint(pt)
+
+            if not hwnd_at_point:
+                return False
+
+            # 可能是子窗口，往上找根窗口
+            root = user32.GetAncestor(wintypes.HWND(hwnd_at_point), 2)  # GA_ROOT
+            if root:
+                hwnd_at_point = root
+
+            return hwnd_at_point == hwnd
+
+        except Exception as e:
+            logger.debug(f"可见性检查失败: {e}")
+            return True     # 查不了就不阻挠
+
+    def _ensure_visible(self, hwnd: int) -> bool:
+        """确保窗口真的可见
+
+        Returns:
+            True = 确认可见；False = 看不到（可能被遮住）
+        """
+        rect = self._get_window_rect(hwnd)
+        if not rect:
+            return False
+
+        left, top, ww, wh = rect
+
+        # 多个检查点：中心 + 偏上 + 偏下
+        # 单点可能落在子控件上，多点更可靠
+        points = [
+            (left + ww // 2, top + int(wh * 0.45)),
+            (left + ww // 2, top + int(wh * 0.25)),
+            (left + int(ww * 0.3), top + int(wh * 0.6)),
+        ]
+
+        for cx, cy in points:
+            if self._is_window_visible_at(hwnd, cx, cy):
+                return True
+
+        return False
+
+    def _get_window_rect(self, hwnd: int) -> Optional[Tuple[int, int, int, int]]:
+        """拿窗口矩形 (left, top, width, height)"""
+        try:
+            import ctypes
+            from ctypes import wintypes
+
+            rect = wintypes.RECT()
+            ctypes.windll.user32.GetWindowRect(
+                wintypes.HWND(hwnd), ctypes.byref(rect)
+            )
+            ww = rect.right - rect.left
+            hh = rect.bottom - rect.top
+            if ww > 100 and hh > 100:
+                return (rect.left, rect.top, ww, hh)
+        except Exception:
+            pass
+        return None
+
     def _force_focus(self, hwnd: int) -> bool:
         """强制把窗口拿到前台
 
@@ -1124,20 +1207,62 @@ class ComputerUse:
             return {}
 
     def list_windows(self, visible_only: bool = True) -> List[Dict]:
-        """列出所有窗口"""
+        """列出所有窗口
+
+        过滤掉：
+          · 无标题的
+          · 系统工具窗口（弹出、隐私声明、输入体验等）
+          · 重复的
+        """
         try:
             import pygetwindow as gw
+
+            # 系统噪声窗口关键词
+            noise = (
+                "OrayPrivacyWnd", "SpeedBall", "LeAsWpTipWin",
+                "Windows 输入体验", "弹出窗口", "Program Manager",
+                "MSCTFIME", "Default IME", "Cua.",
+            )
+
             windows = []
+            seen = set()
+
             for w in gw.getAllWindows():
                 if visible_only and (not w.title or not w.visible):
                     continue
+
+                title = w.title.strip()
+                if not title:
+                    continue
+
+                # 过滤噪声
+                if any(n in title for n in noise):
+                    continue
+
+                # 过滤过小的（工具窗口）
+                try:
+                    if w.width < 200 or w.height < 100:
+                        continue
+                except Exception:
+                    pass
+
+                # 去重
+                if title in seen:
+                    continue
+                seen.add(title)
+
                 windows.append({
-                    "title": w.title,
+                    "title": title,
                     "left": w.left,
                     "top": w.top,
                     "width": w.width,
                     "height": w.height,
+                    "active": bool(getattr(w, "isActive", False)),
                 })
+
+            # 活动窗口排最前
+            windows.sort(key=lambda x: (not x["active"], -x["width"]))
+
             return windows
         except Exception:
             return []
