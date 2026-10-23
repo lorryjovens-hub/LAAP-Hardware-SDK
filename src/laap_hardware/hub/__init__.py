@@ -100,6 +100,21 @@ from laaper.hub.xiaozhi_voice_link import (
     XiaozhiVoiceLink,
     quick_start,
 )
+from laaper.hub.xiaozhi_audio_stream import (
+    SAMPLE_RATE,
+    FRAME_BYTES,
+    FRAME_MS,
+    OpusCodec,
+    VADConfig,
+    EnergyVAD,
+    AudioConfig,
+    ASRClient,
+    TTSClient,
+    LocalWhisperASR,
+    XiaozhiAudioServer,
+    opus_roundtrip_test,
+    get_audio_status,
+)
 
 __all__ = [
     # 节点
@@ -192,4 +207,18 @@ __all__ = [
     "LinkStats",
     "XiaozhiVoiceLink",
     "quick_start",
+    # 音频流直连
+    "SAMPLE_RATE",
+    "FRAME_BYTES",
+    "FRAME_MS",
+    "OpusCodec",
+    "VADConfig",
+    "EnergyVAD",
+    "AudioConfig",
+    "ASRClient",
+    "TTSClient",
+    "LocalWhisperASR",
+    "XiaozhiAudioServer",
+    "opus_roundtrip_test",
+    "get_audio_status",
 ]
