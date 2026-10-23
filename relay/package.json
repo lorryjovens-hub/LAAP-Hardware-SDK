@@ -1,0 +1,17 @@
+{
+  "name": "laap-relay",
+  "version": "1.0.0",
+  "private": true,
+  "description": "LAAP 三端联动云端中继 — WebSocket relay with Durable Objects",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "tail": "wrangler tail",
+    "secret": "wrangler secret put JWT_SECRET"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "^4.20240909.0",
+    "typescript": "^5.5.0",
+    "wrangler": "^3.78.0"
+  }
+}

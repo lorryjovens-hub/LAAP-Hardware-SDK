@@ -60,6 +60,24 @@ from laaper.hub.android_node import (
     register_android_node,
     get_android_status,
 )
+from laaper.hub.computer_use import (
+    CUAction,
+    CUActionResult,
+    ComputerUse,
+    VoiceIntent,
+    VoiceIntentParser,
+    enable_dpi_awareness,
+    get_screen_size,
+    get_computer_status,
+)
+from laaper.hub.voice_computer import (
+    ScreenElement,
+    ElementLocator,
+    VoiceActionResult,
+    VoiceComputerAgent,
+    register_computer_use_handlers,
+    get_voice_computer_status,
+)
 
 __all__ = [
     # 节点
@@ -117,4 +135,20 @@ __all__ = [
     "find_adb",
     "register_android_node",
     "get_android_status",
+    # 电脑控制
+    "CUAction",
+    "CUActionResult",
+    "ComputerUse",
+    "VoiceIntent",
+    "VoiceIntentParser",
+    "enable_dpi_awareness",
+    "get_screen_size",
+    "get_computer_status",
+    # 语音控制电脑
+    "ScreenElement",
+    "ElementLocator",
+    "VoiceActionResult",
+    "VoiceComputerAgent",
+    "register_computer_use_handlers",
+    "get_voice_computer_status",
 ]
