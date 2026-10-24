@@ -1,14 +1,29 @@
-# BSP 组件 — 按 Kconfig 选择编译哪块板子
+# BSP component -- compile only the selected board
 #
-# 关键设计：只编译选中的 board.c，其余板子代码不进二进制。
-# 应用代码依赖统一的 bsp.h，不依赖任何具体板子。
+# Design: only the chosen board.c goes into the binary.
+# App code depends on the unified bsp.h, never on a specific board.
+#
+# NOTE: messages kept ASCII on purpose -- CMake console codepage on Windows
+# is not UTF-8, so Chinese text in message() shows up as mojibake and makes
+# real errors hard to read.
+
+# --- Case 1: no board configured (e.g. a project that does not use BSP) ---
+# Register a header-only component so any component that declares
+# REQUIRES bsp still resolves, instead of failing the whole configure step.
+if(NOT CONFIG_BSP_BOARD)
+    message(STATUS "LAAP BSP: CONFIG_BSP_BOARD not set -> BSP disabled (headers only)")
+    idf_component_register(INCLUDE_DIRS "include")
+    return()
+endif()
 
 set(BOARD_DIR "boards/${CONFIG_BSP_BOARD}")
 
+# --- Case 2: board selected but no implementation ---
 if(NOT EXISTS "${CMAKE_CURRENT_LIST_DIR}/${BOARD_DIR}/board.c")
     message(FATAL_ERROR
-        "BSP: 找不到板子实现 ${BOARD_DIR}/board.c\n"
-        "请检查 components/bsp/boards/ 下的目录名与 Kconfig 的 CONFIG_BSP_BOARD 是否一致。")
+        "BSP: board implementation not found: ${BOARD_DIR}/board.c . "
+        "Check that components/bsp/boards/<name>/ matches CONFIG_BSP_BOARD "
+        "(currently '${CONFIG_BSP_BOARD}'), or run 'idf.py menuconfig' and pick a board.")
 endif()
 
 idf_component_register(
@@ -29,5 +44,4 @@ idf_component_register(
         esp_adc
 )
 
-# 打印选中的板子，构建时一眼看到
 message(STATUS "LAAP BSP: board = ${CONFIG_BSP_BOARD}")

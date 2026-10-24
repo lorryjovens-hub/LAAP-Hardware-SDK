@@ -16,6 +16,7 @@
 #include "lbp_bus.h"
 #include "lbp_tp.h"
 #include "lbp_frame.h"
+#include "lbp_payload.h"      /* LBP_TOPO_MAX_CHILDREN 定义在这里 */
 
 #ifdef __cplusplus
 extern "C" {

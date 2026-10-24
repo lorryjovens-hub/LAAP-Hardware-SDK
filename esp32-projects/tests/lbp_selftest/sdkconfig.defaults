@@ -1,0 +1,22 @@
+# LBP 自检固件
+# 纯逻辑测试，不需要任何外设
+
+CONFIG_IDF_TARGET="esp32s3"
+
+# 串口输出（模拟器要靠这个读结果）
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+
+# 浮点格式化要开（printf %f）
+CONFIG_NEWLIB_NANO_FORMAT=n
+
+# 关掉看门狗干扰（自检可能短暂阻塞）
+CONFIG_ESP_TASK_WDT_INIT=n
+CONFIG_ESP_INT_WDT=n
+
+# 日志精简，只留我们自己的 printf
+CONFIG_LOG_DEFAULT_LEVEL_WARN=y
+CONFIG_BOOTLOADER_LOG_LEVEL_WARN=y
+
+# 主任务栈加大：自检里有较多局部缓冲，默认 3584 字节偏紧
+CONFIG_ESP_MAIN_TASK_STACK_SIZE=8192

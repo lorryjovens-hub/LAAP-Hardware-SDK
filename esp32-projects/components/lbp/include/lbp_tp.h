@@ -40,7 +40,8 @@ extern "C" {
 #endif
 
 #define LBP_TP_CAN_DLC      8
-#define LBP_TP_MAX_PEERS    8
+/* 并发收发对端数：1 主 + 4 从。若增大，注意 lbp_tp_t 体积。 */
+#define LBP_TP_MAX_PEERS    4
 
 /* 分段类型 */
 #define LBP_TP_SINGLE       0x1
@@ -95,6 +96,19 @@ typedef struct {
     uint32_t rx_lbp;
     uint32_t drops;
 } lbp_tp_t;
+
+/*
+ * ⚠ 尺寸提醒：lbp_tp_t ≥ LBP_TP_MAX_PEERS × (LBP_MAX_FRAME + 12)
+ *   默认 4 × 1KB ≈ 4.3 KB。
+ *
+ *   与 lbp_reasm_t 一样，**严禁放栈上**，必须 static / 全局 / 堆。
+ *   实测两个 8KB 的 lbp_tp_t 放栈上直接把 app_main 栈踩爆，
+ *   表现为 FreeRTOS assert "Uninitialized lock used"，回溯完全对不上。
+ *
+ *   典型用法：
+ *       static lbp_tp_t g_tp;     // 或 malloc
+ *       lbp_tp_init(&g_tp, 500);
+ */
 
 void lbp_tp_init(lbp_tp_t *tp, uint32_t timeout_ms);
 

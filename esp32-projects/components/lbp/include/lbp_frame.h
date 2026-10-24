@@ -108,6 +108,22 @@ typedef struct {
     uint32_t loss_detected;
 } lbp_reasm_t;
 
+/*
+ * ⚠ 尺寸提醒：lbp_reasm_t ≈ LBP_REASM_MAX_GROUPS × (LBP_REASM_BUF_SIZE + 12)
+ *   默认 4 × 1KB ≈ 4.1 KB。
+ *
+ *   必须放 static、全局或堆 —— 放栈上会把默认 3.5KB 的 app_main 栈直接爆掉。
+ *   实测表现：Guru Meditation (InstructionFetchError) + Backtrace CORRUPTED，
+ *   堆栈被踩后 PC 已经是垃圾值，很难通过调用栈定位。
+ *
+ *   典型用法：
+ *       static lbp_reasm_t g_reasm;     // 或 malloc
+ *       lbp_reasm_init(&g_reasm, 2000);
+ *
+ *   若确实想减小：降低 LBP_REASM_MAX_GROUPS（并发分片组数），
+ *   或在 lbp_node/lbp_master 里改成指针 + 堆分配。
+ */
+
 void lbp_reasm_init(lbp_reasm_t *r, uint32_t timeout_ms);
 
 /**
