@@ -17,6 +17,12 @@ esp32-projects/
 │   └── WORKFLOW.md              从零到一台能跑的机器人的完整工作流
 ├── scaffold/
 │   └── laap_hw.py               ★ 脚手架：一条命令生成完整 IDF 工程
+├── components/
+│   └── laap_core/               ★ C 组件：协议/传输/队列，四个项目共用
+│       ├── include/             laap_core.h · protocol · transport · task · types
+│       ├── laap_protocol.c      LDP 编解码（不依赖 IDF，PC 可测）
+│       ├── laap_transport.c     WS + 指数退避重连 + 心跳
+│       └── laap_task.c          优先级延迟队列（WS 回调→主循环）
 ├── sdk/
 │   └── laap_esp32/              ★ LAAP ESP32 统一 SDK（Python 参考实现）
 │       ├── protocol.py          LDP 协议（注册/感知/运动/对话）
@@ -31,7 +37,53 @@ esp32-projects/
 └── tools/
     ├── sdk_selftest.py          SDK 全量自检
     ├── fk_verify.py             ★ 正运动学反验 IK（0.00mm 误差）
-    └── gait_animate.py          步态可视化（导出动画帧）
+    ├── gait_animate.py          步态可视化（导出动画帧）
+    └── c_static_check.py        ★ C 组件静态检查（无编译器时验证结构）
+```
+
+---
+
+## laap_core：一行接入 LAAP
+
+固件侧不再重复实现协议/重连/心跳/队列：
+
+```c
+static void on_msg(const laap_msg_t *m, void *user) {
+    if (m->kind == LAAP_MSG_MOTION_POSE) motion_pose(m->pose);
+    else if (m->kind == LAAP_MSG_DIALOGUE_STATE) display_set_expression(...);
+}
+
+laap_core_config_t cfg = {
+    .device_id = "pet-01",
+    .kind      = "pet",
+    .host      = CONFIG_PET_WS_HOST,
+    .port      = CONFIG_PET_WS_PORT,
+    .caps      = LAAP_CAP_MOTION | LAAP_CAP_DISPLAY | LAAP_CAP_SPEAK | LAAP_CAP_TOUCH,
+    .motion    = LAAP_MOTION_PANTILT,
+    .poses     = (const char*[]){"home","look_up","think","sleep","nod",NULL},
+    .on_message = on_msg,
+};
+laap_core_start(&cfg);
+
+while (1) {                      // 主循环 50Hz
+    laap_core_tick();            // 按优先级处理下行消息
+    display_update(20); motion_tick(20); touch_poll();
+    vTaskDelay(pdMS_TO_TICKS(20));
+}
+```
+
+它内部管了：
+
+| 能力 | 说明 |
+|------|------|
+| LDP 编解码 | hello/percept/motion/dialogue 全类型 |
+| 指数退避重连 | 1→60s，±30% 抖动防重连风暴 |
+| 心跳保活 | 25s，防 NAT 表过期 |
+| 优先级队列 | 急停插队，背景任务可丢 |
+| 并发隔离 | WS 回调只入队，外设只在主循环写 |
+| 自动注册 | 连上即发 hello 声明能力 |
+
+验证：`python tools/c_static_check.py`（9 文件 / 1291 行 / 28 API 全定义）
 ```
 
 ---
@@ -261,11 +313,12 @@ projects/pet_robot/firmware/main/
 | 调研报告（四类开源、对话/运控算法） | ✅ 完成 |
 | LDP 协议 | ✅ 实现 + 自检 |
 | 脚手架 `laap_hw.py` | ✅ 生成 + doctor 实测通过（16 文件） |
+| **C 组件 `laap_core`** | ✅ **完成**（协议/传输/队列，1291 行，静态检查全绿） |
 | 桌面宠物固件 | ✅ 完整骨架（眼睛表情/云台/音频/触摸/协议全实现） |
 | 芯片选型指南 | ✅ docs/HARDWARE_SELECTION_2026.md |
-| **C 语言公共组件 `laap_core`** | ⚠️ **缺**（协议/算法目前在 Python，固件侧需复制） |
+| 生命感知算法 | ✅ 预测编码/可供性/主动探索/内感受（18 项行为验收全过） |
 | **BSP 板级支持包** | ⚠️ **缺**（换板需改引脚宏，未抽成 bsp_<board>） |
-| 各项目真机编译联调 | 🟡 代码就位，**未在真板跑过** |
+| 各项目真机编译联调 | 🟡 代码就位，**未在真板跑过**（本机无 IDF/gcc） |
 | 固件侧 libopus | 🟡 音频当前 PCM 直通，未接 Opus 编码 |
 | 真机标定 | ⚪ 需实际舵机/电机 |
 | RL 步态（MuJoCo sim2real） | ⚪ 待深入 |
