@@ -70,6 +70,14 @@ from .kinematics import (
     IKResult, ik_dls, ik_generic,
     convex_hull_2d, stability_margin,
 )
+from .payload import (
+    encode_topo_ack, decode_topo_ack,
+    encode_cmd, decode_cmd,
+    encode_telem, decode_telem,
+    encode_reflex, decode_reflex, ReflexCode,
+    encode_clock_sync, decode_clock_sync,
+    size_reference,
+)
 
 __all__ = [
     # 链路层
@@ -94,4 +102,11 @@ __all__ = [
     "chain_fk", "tip_position", "jacobian_position",
     "IKResult", "ik_dls", "ik_generic",
     "convex_hull_2d", "stability_margin",
+    # 载荷编解码
+    "encode_topo_ack", "decode_topo_ack",
+    "encode_cmd", "decode_cmd",
+    "encode_telem", "decode_telem",
+    "encode_reflex", "decode_reflex", "ReflexCode",
+    "encode_clock_sync", "decode_clock_sync",
+    "size_reference",
 ]

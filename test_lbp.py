@@ -80,8 +80,8 @@ except ValueError as e:
 # [3] 分片重组（CAN FD 帧上限 64B，不是载荷 64B）
 frag_max = 64
 frg = Fragmenter(max_frame_bytes=frag_max)
-check("CAN FD 单帧真实载荷容量算对", frg.max_chunk == 64 - 18 - 5 - 4,
-      f"{frg.max_chunk}B（64 - 头18 - 尾5 - 分片头4）")
+check("CAN FD 单帧真实载荷容量算对", frg.max_chunk == 64 - 18 - 5 - 5,
+      f"{frg.max_chunk}B（64 - 头18 - 尾5 - 分片头5）")
 big = make_module("arm_4dof").to_json().encode()
 proto = LBPFrame(type=MsgType.ENUM_ACK, src=2, dst=1, payload=b"", priority=Priority.CONFIG)
 frames = frg.split(proto, big)
@@ -91,13 +91,16 @@ check("每帧整帧不超 CAN FD 64B 上限",
       f"最大 {max(x.wire_size for x in frames)}B")
 
 reassembled = None
+orig_type = None
 for fr in frames:
     # 模拟线路：编码再解码
     got = frg.receive(LBPFrame.decode(fr.encode()))
     if got:
-        reassembled = got[1]
+        orig_type, reassembled = got
 check("分片能重组回原数据", reassembled == big,
       f"{len(reassembled or b'')}B == {len(big)}B")
+check("分片保留原始消息类型", orig_type == MsgType.ENUM_ACK,
+      f"重组后知道这是 {orig_type.name if orig_type else '未知'}")
 
 # 丢一片应该集不齐
 frg2 = Fragmenter(max_frame_bytes=frag_max)
@@ -214,7 +217,7 @@ print("\n[身体层 / 变形]")
 # 质心在 x=-24mm（偏后，因为四条腿的质心把整体拉后）。
 # 所以：
 #   拔后右腿 → 剩下三角形的质心更靠近边 → 裕度 5.8mm < 15mm → 拒绝
-#   拔前左腿 → 剩下的三角形包围质心更好 → 裕度 21mm → 允许
+#   拔前左腿 → 剩下的三角形包围质心更好 → 裕度 28.1mm → 允许
 #
 # 这不是「全部拒绝」也不是「全部允许」，而是真的算了几何。
 eng = MorphEngine(assemble_quadruped(), power_budget_w=300.0)
@@ -233,7 +236,10 @@ check("拒绝后稳定裕度不变",
 eng_front = MorphEngine(assemble_quadruped(), power_budget_w=300.0)
 r_front = eng_front.detach(1, 0)     # 前左腿
 print("  " + r_front.report().replace("\n", "\n  "))
-check("拔前左腿 → 允许（裕度 21mm）", r_front.ok, r_front.change)
+check("拔前左腿 → 允许（裕度足够）", r_front.ok, r_front.change)
+check("前腿三足裕度大于阈值",
+      r_front.ok and eng_front.schema.stability_margin_m > 0.015,
+      f"{eng_front.schema.stability_margin_m*1000:.1f}mm > 15mm")
 check("变三足，支撑重算为 3 点",
       eng_front.schema.contact_count == 3
       and eng_front.schema.locomotion_mode == "tripod",

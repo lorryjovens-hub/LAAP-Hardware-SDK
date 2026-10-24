@@ -201,23 +201,34 @@ class LBPFrame:
 
 @dataclass
 class Fragment:
-    """分片头（放在 FRAG 帧载荷前 4 字节）"""
+    """分片头（放在 FRAG 帧载荷前 5 字节）
+
+    ## msg_type 为什么必需
+
+    分片后的帧 type 都是 FRAG，原始消息类型就丢了。
+    接收方重组完只知道"这是一堆字节"，不知道是 BMD 还是别的什么。
+
+    初版漏了这个字段，结果脊柱能重组出 663 字节却无法判断它是 ENUM_ACK。
+    在真总线上这个 bug 的表现是「收到数据但不知道该怎么处理，默默丢掉」。
+    """
     group_id: int       # 分片组标识
     index: int          # 第几片
     total: int          # 共几片
+    msg_type: int = 0   # 原始消息类型（MsgType）
 
-    HEADER_SIZE = 4
+    HEADER_SIZE = 5
 
     def pack(self) -> bytes:
-        return struct.pack("<HBB", self.group_id & 0xFFFF,
-                           self.index & 0xFF, self.total & 0xFF)
+        return struct.pack("<HBBB", self.group_id & 0xFFFF,
+                           self.index & 0xFF, self.total & 0xFF,
+                           self.msg_type & 0xFF)
 
     @classmethod
     def unpack(cls, data: bytes) -> Tuple["Fragment", bytes]:
         if len(data) < cls.HEADER_SIZE:
             raise ValueError("分片头不完整")
-        gid, idx, tot = struct.unpack("<HBB", data[:4])
-        return cls(gid, idx, tot), data[4:]
+        gid, idx, tot, mt = struct.unpack("<HBBB", data[:cls.HEADER_SIZE])
+        return cls(gid, idx, tot, mt), data[cls.HEADER_SIZE:]
 
 
 class Fragmenter:
@@ -229,8 +240,8 @@ class Fragmenter:
       · CAN FD：64 字节（ISO 11898-2 的 data field 上限）
       · 以太网：1500 字节（MTU）
 
-    所以实际载荷 = max_frame_bytes - LBP头(18) - LBP尾(5) - 分片头(4)
-    CAN FD → 64 - 18 - 5 - 4 = 37 字节
+    所以实际载荷 = max_frame_bytes - LBP头(18) - LBP尾(5) - 分片头(5)
+    CAN FD → 64 - 18 - 5 - 5 = 36 字节
 
     之前把 max_payload 当载荷长，算出来一帧 82 字节，CAN 上根本发不出。
 
@@ -271,7 +282,7 @@ class Fragmenter:
 
         out = []
         for i in range(n):
-            frag = Fragment(gid, i, n)
+            frag = Fragment(gid, i, n, int(proto.type))
             piece = data[i * chunk:(i + 1) * chunk]
             out.append(LBPFrame(
                 type=MsgType.FRAG,
@@ -286,10 +297,13 @@ class Fragmenter:
         return out
 
     # ── 接收侧 ──
-    def receive(self, frame: LBPFrame) -> Optional[Tuple[LBPFrame, bytes]]:
+    def receive(self, frame: LBPFrame) -> Optional[Tuple[MsgType, bytes]]:
         """收到一个 FRAG 帧。
 
-        返回 (原始帧头模板, 完整数据) 当集齐时；否则 None。
+        集齐时返回 (原始消息类型, 完整数据)；否则 None。
+
+        返回原类型而不是一个 frame：因为调用方需要知道该把重组出的数据
+        当什么处理（BMD？固件？拓扑表？）。
         """
         if frame.type != MsgType.FRAG:
             return None
@@ -298,7 +312,8 @@ class Fragmenter:
         key = (frame.src, frag.group_id)
 
         if frag.index == 0:
-            self._rx[key] = {"total": frag.total, "parts": {}, "hdr": frame}
+            self._rx[key] = {"total": frag.total, "parts": {},
+                             "msg_type": frag.msg_type, "hdr": frame}
 
         state = self._rx.get(key)
         if state is None:
@@ -319,10 +334,14 @@ class Fragmenter:
             del self._rx[key]
             return None
 
-        hdr = state["hdr"]
+        try:
+            orig_type = MsgType(state["msg_type"])
+        except ValueError:
+            orig_type = MsgType.FRAG
+
         del self._rx[key]
         self._stats["recv_groups"] += 1
-        return hdr, data
+        return orig_type, data
 
     @property
     def stats(self) -> dict:
