@@ -18,6 +18,12 @@ esp32-projects/
 ├── scaffold/
 │   └── laap_hw.py               ★ 脚手架：一条命令生成完整 IDF 工程
 ├── components/
+│   ├── bsp/                     ★ 板级支持包（5 块板 + 弱符号降级）
+│   │   ├── README.md            换板不改业务代码的机制说明
+│   │   ├── include/bsp.h        统一接口（应用只 include 这个）
+│   │   ├── bsp_base.c           通用层 + 弱默认实现
+│   │   ├── bsp_common.c         SPI LCD / 舵机 / I2S / ADC 公共实现
+│   │   └── boards/              s3_round_gc9a01 / s3_korvo2 / s3_eye / p4_lcd / generic
 │   └── laap_core/               ★ C 组件：协议/传输/队列，四个项目共用
 │       ├── include/             laap_core.h · protocol · transport · task · types
 │       ├── laap_protocol.c      LDP 编解码（不依赖 IDF，PC 可测）
@@ -38,7 +44,50 @@ esp32-projects/
     ├── sdk_selftest.py          SDK 全量自检
     ├── fk_verify.py             ★ 正运动学反验 IK（0.00mm 误差）
     ├── gait_animate.py          步态可视化（导出动画帧）
-    └── c_static_check.py        ★ C 组件静态检查（无编译器时验证结构）
+    ├── c_static_check.py        ★ C 组件静态检查（无编译器时验证结构）
+    └── bsp_doctor.py            ★ 板级定义检查（引脚冲突/能力一致性）
+```
+
+---
+
+## BSP：换板不改代码
+
+应用代码只问「这块板有什么能力」，不问「你是哪块板」：
+
+```c
+void app_main(void) {
+    ESP_ERROR_CHECK(bsp_init());   // 板子自己初始化
+    display_init();                // 内部判断有无屏幕
+    motion_init();                 // 内部判断有无舵机
+    audio_init();
+    touch_init(on_touch);
+    // ... 同一份代码，5 块板都能跑
+}
+```
+
+5 块板子的能力矩阵：
+
+| 板子 | 屏幕 | 舵机 | 音频 | 触摸 | 摄像头 | 价格 |
+|------|:---:|:---:|:---:|:---:|:---:|------|
+| `s3_round_gc9a01` | 240² | 2ch | 麦+喇叭 | ✅ | — | ¥120 |
+| `s3_korvo2` | 240² | — | 双麦+功放 | 按键 | — | ¥260 |
+| `s3_eye` | 240² | — | 仅麦 | 按键 | ✅ | ¥230 |
+| `p4_lcd` | DSI | — | codec | ✅ | — | ¥500 |
+| `generic` | 自定义 | 2ch | ✅ | ✅ | — | — |
+
+机制是**弱符号降级**：`bsp_base.c` 给每个接口弱默认实现，
+板子用强符号覆盖自己具备的。板子只写自己有的，漏写不会链接失败。
+详见 [components/bsp/README.md](components/bsp/README.md)。
+
+验证：
+
+```bash
+python tools/bsp_doctor.py -v     # 引脚冲突 / 能力一致性
+python tools/c_static_check.py    # C 组件结构检查
+```
+
+> `bsp_doctor` 实测抓到 `s3_eye` 上 GPIO2 被 LCD_RST 和麦克风同时占用——
+> 这类问题编译器不报，烧到板子上才发现。
 ```
 
 ---
@@ -314,11 +363,13 @@ projects/pet_robot/firmware/main/
 | LDP 协议 | ✅ 实现 + 自检 |
 | 脚手架 `laap_hw.py` | ✅ 生成 + doctor 实测通过（16 文件） |
 | **C 组件 `laap_core`** | ✅ **完成**（协议/传输/队列，1291 行，静态检查全绿） |
-| 桌面宠物固件 | ✅ 完整骨架（眼睛表情/云台/音频/触摸/协议全实现） |
+| **BSP 板级支持包** | ✅ **完成**（5 块板 + 弱符号降级，1994 行，doctor 全绿） |
+| 桌面宠物固件 | ✅ 完整骨架，**已改为依赖 BSP**（业务代码不含引脚） |
 | 芯片选型指南 | ✅ docs/HARDWARE_SELECTION_2026.md |
 | 生命感知算法 | ✅ 预测编码/可供性/主动探索/内感受（18 项行为验收全过） |
-| **BSP 板级支持包** | ⚠️ **缺**（换板需改引脚宏，未抽成 bsp_<board>） |
+| **BSP 板级支持包** | ✅ 完成（换板不改代码） |
 | 各项目真机编译联调 | 🟡 代码就位，**未在真板跑过**（本机无 IDF/gcc） |
+| P4 DSI / Korvo codec / S3-EYE 摄像头 | 🟡 配置就位，需装对应驱动组件 |
 | 固件侧 libopus | 🟡 音频当前 PCM 直通，未接 Opus 编码 |
 | 真机标定 | ⚪ 需实际舵机/电机 |
 | RL 步态（MuJoCo sim2real） | ⚪ 待深入 |

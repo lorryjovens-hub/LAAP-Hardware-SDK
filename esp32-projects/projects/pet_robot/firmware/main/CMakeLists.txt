@@ -8,14 +8,12 @@ idf_component_register(
         "network.c"
     INCLUDE_DIRS "."
     REQUIRES
+        bsp
+        laap_core
         esp_wifi
         esp_event
         esp_netif
         nvs_flash
         esp_websocket_client
-        esp_lcd
-        esp_lvgl_port
-        lvgl
-        driver
         json
 )

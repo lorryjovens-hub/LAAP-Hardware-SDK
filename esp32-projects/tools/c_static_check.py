@@ -1,38 +1,53 @@
 """C 代码静态检查器 — 没有 gcc 时能做的验证
 
+支持检查多个组件：
+    python tools/c_static_check.py              # 全部组件
+    python tools/c_static_check.py laap_core    # 指定组件
+
 检查项：
   1. 括号/花括号平衡
   2. 头文件声明的函数是否都有定义
-  3. .c 里调用的 laap_* 函数是否在某个头文件里声明过
+  3. .c 里调用的函数是否在某个头文件里声明过
   4. include 的头文件是否都存在
-  5. 明显问题：未闭合注释、多余分号、static 变量被外部使用
+  5. 头文件保护
+  6. 弱符号默认实现覆盖（BSP 特有：每个弱接口都有对应强实现或确实不需要）
+
+## 弱符号检查（BSP 关键）
+
+bsp_base.c 给每个板级接口一个弱默认实现，board.c 用强符号覆盖。
+如果 board.c 声明了某项能力（BSP_CAP_X）但没覆盖对应函数，
+真机上就会走到"不支持"分支。这个检查抓这类问题。
 """
 from __future__ import annotations
 
 import re
 import sys
 from pathlib import Path
-from typing import Dict, List, Set, Tuple
+from typing import Dict, List, Set
 
-COMP = Path(r"D:\LAAP\laap-hardware\esp32-projects\components\laap_core")
+ROOT = Path(__file__).resolve().parent.parent
+COMPONENTS = ROOT / "components"
 
-# 匹配函数声明/定义：返回类型 名字(参数)
 DECL_RE = re.compile(
-    r"^\s*(?:static\s+|extern\s+|inline\s+)*"
+    r"^\s*"
+    r"(?:(?:__attribute__\s*\(\([^)]*\)\)|static|extern|inline)\s*)*"
     r"(?:const\s+)?(?:unsigned\s+|signed\s+)?"
     r"(?:void|int|char|float|double|bool|size_t|int64_t|int32_t|int16_t|int8_t|"
-    r"uint64_t|uint32_t|uint16_t|uint8_t|laap_err_t|laap_msg_kind_t|laap_state_t|"
-    r"const\s+char\s*\*)\s*"
+    r"uint64_t|uint32_t|uint16_t|uint8_t|esp_err_t|laap_err_t|laap_msg_kind_t|"
+    r"laap_state_t|const\s+\w+\s*\*|\w+_t)\s*"
     r"(\*?\s*)(\w+)\s*\(",
     re.MULTILINE,
 )
 
+# 系统/IDF 头文件白名单（只检查项目内 include）
+KNOWN_INC = ("esp_", "freertos/", "driver/", "cJSON", "sdkconfig", "soc/",
+             "hal/", "stdio", "string", "stdlib", "stdint", "stdbool",
+             "stddef", "math", "stdlib")
+
 
 def strip_comments(src: str) -> str:
-    """去掉注释和字符串，避免误判"""
     src = re.sub(r"/\*.*?\*/", "", src, flags=re.DOTALL)
     src = re.sub(r"//[^\n]*", "", src)
-    # 去掉字符串字面量
     src = re.sub(r'"(?:\\.|[^"\\])*"', '""', src)
     src = re.sub(r"'(?:\\.|[^'\\])*'", "''", src)
     return src
@@ -71,12 +86,15 @@ def collect_decls(header: Path) -> Set[str]:
     return out
 
 
-def collect_defs(cfile: Path) -> Set[str]:
-    src = strip_comments(cfile.read_text(encoding="utf-8", errors="replace"))
-    out = set()
+def collect_defs(cfile: Path, include_weak: bool = True) -> Dict[str, bool]:
+    """返回 {函数名: 是否弱符号}"""
+    raw = cfile.read_text(encoding="utf-8", errors="replace")
+    src = strip_comments(raw)
+
+    # 记录每个函数前面最近的 weak 标记
+    out: Dict[str, bool] = {}
     for m in DECL_RE.finditer(src):
         name = m.group(2)
-        # 定义的特征：名字后面到匹配括号之后有 '{'
         start = m.end()
         depth = 1
         i = start
@@ -87,120 +105,156 @@ def collect_defs(cfile: Path) -> Set[str]:
                 depth -= 1
             i += 1
         rest = src[i:i + 80].lstrip()
-        if rest.startswith("{") or rest.startswith("const {"):
-            out.add(name)
+        if not (rest.startswith("{") or rest.startswith("const {")):
+            continue
+
+        # 往前找 300 字符 + 本次匹配内是否有 weak 标记
+        marker = src[max(0, m.start() - 300):m.end()]
+        is_weak = "__attribute__" in marker and "weak" in marker
+        out[name] = is_weak
     return out
 
 
-def collect_calls(cfile: Path) -> Set[str]:
-    src = strip_comments(cfile.read_text(encoding="utf-8", errors="replace"))
-    return set(re.findall(r"\b(laap_\w+)\s*\(", src))
+def check_component(name: str, comp: Path) -> tuple:
+    headers = sorted((comp / "include").glob("*.h"))
+    cfiles = sorted(comp.glob("*.c"))
 
+    issues: List[str] = []
+    warns: List[str] = []
 
-def main() -> int:
-    if not COMP.exists():
-        print(f"组件目录不存在: {COMP}")
-        return 1
-
-    headers = sorted((COMP / "include").glob("*.h"))
-    cfiles = sorted(COMP.glob("*.c"))
-
-    print("=" * 62)
-    print("LAAP Core C 组件静态检查")
-    print("=" * 62)
-    print(f"头文件 {len(headers)} 个 | 实现 {len(cfiles)} 个\n")
-
-    all_issues: List[str] = []
-
-    # 1. 括号平衡
+    # 1. 括号
     for f in headers + cfiles:
-        all_issues += check_balance(f)
-    print(f"[1] 括号平衡: {'✓ 全部通过' if not all_issues else '✗ ' + str(len(all_issues)) + ' 处问题'}")
+        issues += [f"[{name}] {i}" for i in check_balance(f)]
 
-    # 2. 头文件声明的函数都有定义
+    # 2. 头文件 API 都有定义
     decls: Dict[str, str] = {}
     for h in headers:
         for d in collect_decls(h):
             decls[d] = h.name
-    defs: Set[str] = set()
+
+    defs: Dict[str, bool] = {}
     for c in cfiles:
-        defs |= collect_defs(c)
+        defs.update(collect_defs(c))
 
-    # 排除类型名/宏
-    api = {d for d in decls if d.startswith("laap_")}
-    missing_def = sorted(api - defs)
-    print(f"[2] 头文件 API {len(api)} 个，已定义 {len(api & defs)} 个"
-          + (f"，缺定义: {missing_def}" if missing_def else " ✓"))
+    # 板级子目录（BSP 特例）
+    boards_dir = comp / "boards"
+    board_files = sorted(boards_dir.glob("*/board.c")) if boards_dir.exists() else []
 
-    # 3. 调用的 laap_* 都有声明
+    api = {d for d in decls if d.startswith(("laap_", "bsp_"))}
+    # bsp_ 接口允许只有弱默认实现（bsp_base.c 里）
+    missing_def = sorted(api - set(defs))
+    for m in missing_def:
+        issues.append(f"[{name}] 头文件声明了 {m}() 但无定义")
+
+    # 3. 调用的函数都有声明
     calls: Set[str] = set()
-    for c in cfiles:
-        calls |= collect_calls(c)
-    # 定义本身也在调用集合里（定义处也匹配 xxx( ）
-    undeclared = sorted(calls - api - defs)
-    print(f"[3] 调用 {len(calls)} 个 laap_* 函数"
-          + (f"，未声明: {undeclared}" if undeclared else " ✓ 全部有声明"))
+    for c in cfiles + board_files:
+        src = strip_comments(c.read_text(encoding="utf-8", errors="replace"))
+        calls |= set(re.findall(r"\b((?:laap|bsp)_\w+)\s*\(", src))
+    undeclared = sorted(calls - api - set(defs))
+    for u in undeclared:
+        issues.append(f"[{name}] 调用了未声明的 {u}()")
 
     # 4. include 存在
-    inc_issues = []
     local_headers = {h.name for h in headers}
-    for c in cfiles:
+    for c in cfiles + board_files:
         src = c.read_text(encoding="utf-8", errors="replace")
         for inc in re.findall(r'#include\s+"([^"]+)"', src):
-            if inc in local_headers:
-                continue
-            # 项目内其它路径
-            if (COMP / inc).exists() or (COMP / "include" / inc).exists():
-                continue
-            # ESP-IDF / 系统头：只白名单检查
-            known = ("esp_", "freertos/", "driver/", "cJSON", "sdkconfig",
-                     "stdio", "string", "stdlib", "stdint", "stdbool", "stddef", "math")
-            if any(k in inc for k in known):
-                continue
-            inc_issues.append(f"{c.name}: #include \"{inc}\" 找不到")
-    print(f"[4] include 检查: {'✓ 通过' if not inc_issues else '✗ ' + str(len(inc_issues))}")
+            if inc in local_headers: continue
+            if (comp / inc).exists() or (comp / "include" / inc).exists(): continue
+            if (c.parent / inc).exists(): continue
+            if any(k in inc for k in KNOWN_INC): continue
+            issues.append(f"[{name}] {c.name}: #include \"{inc}\" 找不到")
 
     # 5. 头文件保护
-    guard_issues = []
     for h in headers:
         s = h.read_text(encoding="utf-8", errors="replace")
         if "#pragma once" not in s and "#ifndef" not in s:
-            guard_issues.append(f"{h.name} 缺头文件保护")
-    print(f"[5] 头文件保护: {'✓ 通过' if not guard_issues else '✗ ' + str(len(guard_issues))}")
+            issues.append(f"[{name}] {h.name} 缺头文件保护")
 
-    # 6. 命名规范：laap_ 前缀
-    bad_names = [d for d in defs if not d.startswith("laap_")
-                 and not d.startswith("build_") and not d.startswith("on_")
-                 and not d.startswith("set_") and not d.startswith("copy_")
-                 and not d.startswith("get_") and not d.startswith("add_")
-                 and not d.startswith("finish") and not d.startswith("motion_kind")
-                 and not d.startswith("strip") and not d.startswith("reconnect")
-                 and not d.startswith("ws_") and not d.startswith("check")
-                 and not d.startswith("collect") and not d.startswith("now_")]
-    print(f"[6] 内部函数用 static/前缀: {'✓' if not bad_names else '注意: ' + str(bad_names[:5])}")
+    # 6. BSP 弱符号覆盖检查
+    if board_files:
+        weak_funcs = {n for n, w in defs.items() if w}
+        for bf in board_files:
+            bdefs = collect_defs(bf)
+            strong = {n for n, w in bdefs.items() if not w}
+            src = bf.read_text(encoding="utf-8", errors="replace")
+            caps = set(re.findall(r"BSP_CAP_(\w+)", src))
+            # 声明的能力对应函数是否真实现了
+            cap_map = {
+                "DISPLAY": ["bsp_display_init"],
+                "TOUCH": ["bsp_touch_init"],
+                "AUDIO_OUT": ["bsp_audio_init"],
+                "AUDIO_IN": ["bsp_audio_init"],
+                "SERVO": ["bsp_servo_init", "bsp_servo_set_angle"],
+                "I2C": ["bsp_i2c_init"],
+            }
+            for cap, fns in cap_map.items():
+                if cap in caps:
+                    for fn in fns:
+                        if fn not in strong:
+                            warns.append(
+                                f"[{name}] {bf.parent.name}: 声明 {cap} 但未覆盖 {fn}()")
 
-    print()
-    issues = all_issues + inc_issues + guard_issues
-    if missing_def:
-        issues += [f"缺定义: {m}" for m in missing_def]
-    if undeclared:
-        issues += [f"未声明调用: {u}" for u in undeclared]
+    return issues, warns, len(headers) + len(cfiles)
 
-    if issues:
-        print("发现问题：")
+
+def main() -> int:
+    print("=" * 68)
+    print("LAAP C 组件静态检查")
+    print("=" * 68)
+
+    if not COMPONENTS.exists():
+        print(f"✗ 找不到 {COMPONENTS}")
+        return 1
+
+    targets = []
+    if len(sys.argv) > 1 and not sys.argv[1].startswith("-"):
+        targets = [COMPONENTS / sys.argv[1]]
+    else:
+        targets = sorted(d for d in COMPONENTS.iterdir() if d.is_dir())
+
+    all_issues: List[str] = []
+    all_warns: List[str] = []
+    total_files = 0
+    total_lines = 0
+
+    for comp in targets:
+        if not comp.exists():
+            print(f"✗ 组件不存在: {comp.name}")
+            return 1
+
+        issues, warns, nfiles = check_component(comp.name, comp)
+
+        files = (sorted((comp / "include").glob("*.h")) +
+                 sorted(comp.glob("*.c")) +
+                 sorted(comp.glob("boards/*/board.c")) +
+                 sorted(comp.glob("boards/*/board_pins.h")))
+        lines = sum(len(f.read_text(encoding='utf-8', errors='replace').splitlines())
+                    for f in files)
+        total_files += len(files)
+        total_lines += lines
+
+        status = "✓" if not issues else "✗"
+        print(f"\n{status} {comp.name:14s} {len(files)} 文件 / {lines} 行")
+        for w in warns:
+            print(f"    ⚠ {w}")
+            all_warns.append(w)
         for i in issues:
+            print(f"    ✗ {i}")
+            all_issues.append(i)
+
+    print("\n" + "-" * 68)
+    print(f"合计: {total_files} 文件 / {total_lines} 行"
+          + (f" / {len(all_warns)} 个提示" if all_warns else ""))
+
+    if all_issues:
+        print(f"\n发现 {len(all_issues)} 个问题：")
+        for i in all_issues:
             print(f"  ✗ {i}")
         return 1
 
-    # 统计
-    total_lines = sum(len(f.read_text(encoding='utf-8', errors='replace').splitlines())
-                      for f in headers + cfiles)
-    print(f"✓ 全部通过  ({len(headers) + len(cfiles)} 文件 / {total_lines} 行)")
-    print()
-    print("接口清单：")
-    for h in headers:
-        ds = sorted(d for d in collect_decls(h) if d.startswith("laap_"))
-        print(f"  {h.name:20s} {', '.join(ds) if ds else '（无 laap_ API）'}")
+    print("\n✓ 全部通过")
     return 0
 
 

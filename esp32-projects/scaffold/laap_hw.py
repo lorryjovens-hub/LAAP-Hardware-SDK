@@ -206,13 +206,24 @@ def cmd_new(kind: str, name: str, out: str, force: bool = False) -> int:
         else:
             missing.append(fname)
 
-    # 2. 生成引脚头
-    defines = "\n".join(
-        f'#define PIN_{k:<12} GPIO_NUM_{v}'
-        for k, v in tpl.pins.items()
-    ) or "/* 该模板无固定引脚 */"
-    (main_dir / "laap_pins.h").write_text(
-        PINS_HEADER.format(defines=defines), encoding="utf-8"
+    # 2. 生成引脚提示（引脚已由 BSP 接管，这里只留说明）
+    (main_dir / "BOARD.md").write_text(
+        f"# 板子选择\n\n"
+        f"本工程的引脚 **不在这里改**，由 LAAP BSP 管理。\n\n"
+        f"```bash\n"
+        f"idf.py menuconfig\n"
+        f"# LAAP BSP → Board Selection\n"
+        f"```\n\n"
+        f"可选板子：\n\n"
+        f"| 板子 | 说明 |\n"
+        f"|------|------|\n"
+        f"| `s3_round_gc9a01` | ESP32-S3 + GC9A01 圆屏宠物板（¥120） |\n"
+        f"| `s3_korvo2` | 乐鑫语音板（双麦+功放，无舵机） |\n"
+        f"| `s3_eye` | 乐鑫视觉板（摄像头，无扬声器） |\n"
+        f"| `p4_lcd` | ESP32-P4 大屏终端（需外挂 C6） |\n"
+        f"| `generic` | 自定义板（menuconfig 里填引脚） |\n\n"
+        f"换板子只改 menuconfig，业务代码一行不动。\n",
+        encoding="utf-8",
     )
 
     # 3. 构建文件
@@ -233,9 +244,8 @@ def cmd_new(kind: str, name: str, out: str, force: bool = False) -> int:
         f'idf_component_register(\n'
         f'    SRCS {srcs}\n'
         f'    INCLUDE_DIRS "."\n'
-        f'    REQUIRES esp_wifi esp_event esp_netif nvs_flash\n'
-        f'        esp_websocket_client esp_lcd esp_lvgl_port lvgl\n'
-        f'        driver json\n'
+        f'    REQUIRES bsp laap_core esp_wifi esp_event esp_netif nvs_flash\n'
+        f'        esp_websocket_client json\n'
         f')\n',
         encoding="utf-8",
     )
@@ -249,11 +259,13 @@ def cmd_new(kind: str, name: str, out: str, force: bool = False) -> int:
         f"```bash\n"
         f"cd {dst.name}\n"
         f"idf.py set-target {tpl.chip}\n"
-        f"idf.py menuconfig   # 填 WiFi + LAAP host\n"
+        f"idf.py menuconfig   # ① Board Selection ② WiFi + LAAP host\n"
         f"idf.py build flash monitor\n"
         f"```\n\n"
-        f"## 引脚\n\n"
-        f"见 `main/laap_pins.h`（改了引脚只改这个文件）\n\n"
+        f"## 硬件\n\n"
+        f"引脚全部由 **LAAP BSP** 管理（`components/bsp/boards/`）。\n"
+        f"换板子只改 menuconfig 的 Board Selection，业务代码不用动。\n"
+        f"详见 `main/BOARD.md`。\n\n"
         f"## 已生成文件\n\n"
         + "\n".join(f"- `main/{f}`" for f in copied)
         + ("\n\n## 缺源文件（需手写）\n\n" + "\n".join(f"- {m}" for m in missing)
@@ -301,8 +313,10 @@ def cmd_doctor(path: str) -> int:
         print(f"  头文件  : {len(h_files)}")
         if not (main_dir / "CMakeLists.txt").exists():
             problems.append("main/CMakeLists.txt 缺失")
-        if not (main_dir / "laap_pins.h").exists():
-            problems.append("main/laap_pins.h 缺失（引脚未定义）")
+        # BSP 接管引脚：检查是否依赖 bsp 组件
+        cm = (main_dir / "CMakeLists.txt")
+        if cm.exists() and "bsp" not in cm.read_text(encoding="utf-8", errors="replace"):
+            problems.append("main/CMakeLists.txt 未 REQUIRES bsp（引脚无处定义）")
         # 检查 main 入口
         if not any("app_main" in f.read_text(errors="replace") for f in c_files):
             problems.append("没有 app_main 入口")

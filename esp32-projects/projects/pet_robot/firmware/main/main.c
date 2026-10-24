@@ -31,6 +31,7 @@
 #include "motion.h"
 #include "touch.h"
 #include "audio.h"
+#include "bsp.h"
 
 #define TAG "pet"
 
@@ -282,6 +283,7 @@ static void control_loop(void *arg)
         display_update(CTRL_MS);
         motion_tick(CTRL_MS);
         touch_poll();
+        bsp_tick();              /* 板级周期任务（电池采样/按键消抖） */
 
         /* 3. 说话波形随音量起伏（示意：真实实现从 I2S 播放回调取 RMS） */
         if (display_get_expression() == EXPR_SPEAKING) {
@@ -289,7 +291,7 @@ static void control_loop(void *arg)
             display_set_volume(30 + (vol_phase % 60));
         }
 
-        /* 4. 心跳（每 25s） */
+        /* 4. 心跳（每 25s）——带真实电量 */
         int64_t now = esp_timer_get_time() / 1000;
         if (now - last_hb > 25000) {
             last_hb = now;
@@ -298,6 +300,10 @@ static void control_loop(void *arg)
             cJSON_AddStringToObject(r, "device_id", DEVICE_ID);
             cJSON *p = cJSON_AddObjectToObject(r, "payload");
             cJSON_AddNumberToObject(p, "ts", (double)now / 1000.0);
+            int batt = bsp_battery_percent();
+            if (batt >= 0) {
+                cJSON_AddNumberToObject(p, "battery", batt);
+            }
             ws_send_json(r);
         }
 
@@ -319,13 +325,19 @@ void app_main(void)
 {
     ESP_ERROR_CHECK(nvs_flash_init());
 
+    /* ── 第一步：板级初始化 ──
+     * 所有硬件细节都在 BSP 里。换一块板子，这个文件不用改。
+     * BSP 会按能力清单初始化显示/触摸/音频/舵机/电池。 */
+    ESP_ERROR_CHECK(bsp_init());
+
     s_msg_q = xQueueCreate(8, sizeof(char *));
     configASSERT(s_msg_q);
 
-    display_init();
-    motion_init();
-    audio_init();
-    touch_init(on_touch);
+    /* ── 第二步：应用层（生命表达 + 协议）── */
+    display_init();          /* 内部判断有无屏幕 */
+    motion_init();           /* 内部判断有无舵机 */
+    audio_init();            /* 内部判断有无音频 */
+    touch_init(on_touch);    /* 内部判断有无触摸 */
 
     display_set_status("连接中…");
     display_set_expression(EXPR_THINKING);

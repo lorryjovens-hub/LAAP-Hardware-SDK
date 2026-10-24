@@ -1,0 +1,82 @@
+menu "LAAP BSP"
+
+    choice BSP_BOARD_SEL
+        prompt "Board Selection"
+        default BSP_BOARD_S3_ROUND_GC9A01
+        help
+            选择硬件板子。应用代码不依赖这个选择——
+            换板子只改这里，业务代码一行都不用动。
+
+        config BSP_BOARD_S3_ROUND_GC9A01
+            bool "ESP32-S3 + GC9A01 圆屏宠物板（自组，¥120）"
+        config BSP_BOARD_S3_KORVO2
+            bool "ESP32-S3-Korvo-2（乐鑫官方语音板）"
+        config BSP_BOARD_S3_EYE
+            bool "ESP32-S3-EYE（摄像头视觉板）"
+        config BSP_BOARD_P4_LCD
+            bool "ESP32-P4 + LCD（大屏终端）"
+        config BSP_BOARD_GENERIC
+            bool "通用/自定义板（引脚在 menuconfig 里填）"
+    endchoice
+
+    config BSP_BOARD
+        string
+        default "s3_round_gc9a01" if BSP_BOARD_S3_ROUND_GC9A01
+        default "s3_korvo2"       if BSP_BOARD_S3_KORVO2
+        default "s3_eye"          if BSP_BOARD_S3_EYE
+        default "p4_lcd"          if BSP_BOARD_P4_LCD
+        default "generic"         if BSP_BOARD_GENERIC
+
+    config BSP_I2C_PORT
+        int "I2C port number"
+        default 0
+
+    config BSP_I2C_SPEED
+        int "I2C clock (Hz)"
+        default 400000
+
+    menu "Generic Board Pins"
+        depends on BSP_BOARD_GENERIC
+
+        config BSP_GEN_LCD_SCLK
+            int "LCD SCLK" 
+            default 12
+        config BSP_GEN_LCD_MOSI
+            int "LCD MOSI"
+            default 11
+        config BSP_GEN_LCD_CS
+            int "LCD CS"
+            default 10
+        config BSP_GEN_LCD_DC
+            int "LCD DC"
+            default 9
+        config BSP_GEN_LCD_RST
+            int "LCD RST"
+            default 8
+        config BSP_GEN_LCD_BL
+            int "LCD Backlight"
+            default 7
+        config BSP_GEN_SERVO0
+            int "Servo 0 (pan)"
+            default 4
+        config BSP_GEN_SERVO1
+            int "Servo 1 (tilt)"
+            default 5
+        config BSP_GEN_TOUCH
+            int "Touch input"
+            default 6
+        config BSP_GEN_I2S_BCLK
+            int "I2S BCLK"
+            default 18
+        config BSP_GEN_I2S_LRCK
+            int "I2S LRCK"
+            default 17
+        config BSP_GEN_I2S_DOUT
+            int "I2S DOUT (speaker)"
+            default 19
+        config BSP_GEN_I2S_DIN
+            int "I2S DIN (mic)"
+            default 16
+    endmenu
+
+endmenu

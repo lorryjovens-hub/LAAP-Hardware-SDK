@@ -2,6 +2,12 @@
 # 目标：ESP32-S3（N16R8：16MB Flash + 8MB PSRAM）
 CONFIG_IDF_TARGET="esp32s3"
 
+# ── BSP 板子选择 ──
+# 换板子只改这里，业务代码不动。可选：
+#   s3_round_gc9a01 / s3_korvo2 / s3_eye / p4_lcd / generic
+CONFIG_BSP_BOARD_S3_ROUND_GC9A01=y
+CONFIG_BSP_BOARD="s3_round_gc9a01"
+
 # PSRAM（LVGL 双缓冲要）
 CONFIG_SPIRAM=y
 CONFIG_SPIRAM_MODE_OCT=y

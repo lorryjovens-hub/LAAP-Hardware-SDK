@@ -1,33 +1,32 @@
 /*
- * audio.c — I2S 麦克风采集（上行 Opus）+ 功放播放（下行 Opus）
+ * audio.c — I2S 音频（BSP 版）
  *
- * 协议与电脑侧 laaper/hub/screen_stream.py / xiaozhi_audio_stream.py 对齐：
- *   16 kHz / mono / 20ms 帧
+ * 改版前：硬编码 I2S 引脚、采样率、声道模式，自己建 i2s_chan。
+ * 改版后：从 BSP 拿 tx/rx 句柄（bsp_audio_tx/rx），采样率问
+ *        bsp_audio_sample_rate()。**换板子这个文件不用改。**
  *
- * 引脚按你的板改。
+ * 这里剩下的职责：
+ *   · 麦克风采集线程（按帧节流）
+ *   · 播放 + 音量提取（驱动说话波形）
+ *   · Opus 编解码接入点
  */
 #include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/i2s_std.h"
 #include "esp_log.h"
+#include "bsp.h"
 
 #include "audio.h"
 
 #define TAG "audio"
 
-#define PIN_I2S_BCLK    GPIO_NUM_18
-#define PIN_I2S_LRCK    GPIO_NUM_17
-#define PIN_I2S_DOUT    GPIO_NUM_19    /* → MAX98357A DIN（喇叭） */
-#define PIN_I2S_DIN     GPIO_NUM_16    /* ← INMP441 SD（麦克风） */
-
-#define SAMPLE_RATE     16000
 #define FRAME_MS        20
-#define FRAME_SAMPLES   (SAMPLE_RATE * FRAME_MS / 1000)   /* 320 */
-#define FRAME_BYTES     (FRAME_SAMPLES * 2)
 
 static i2s_chan_handle_t s_tx = NULL;
 static i2s_chan_handle_t s_rx = NULL;
+static uint32_t s_sample_rate = 16000;
+static uint16_t s_frame_samples = 320;   /* 16000 * 20ms / 1000 */
 static volatile bool s_mic_on = false;
 static volatile uint8_t s_volume = 0;
 static TaskHandle_t s_mic_task = NULL;
@@ -37,69 +36,66 @@ extern void pet_send_bin(const uint8_t *data, size_t len);
 
 void audio_init(void)
 {
-    i2s_chan_config_t chan_cfg = I2S_CHANNEL_DEFAULT_CONFIG(I2S_NUM_0, I2S_ROLE_MASTER);
-    ESP_ERROR_CHECK(i2s_new_channel(&chan_cfg, &s_tx, &s_rx));
+    s_sample_rate = bsp_audio_sample_rate();
+    s_frame_samples = (uint16_t)(s_sample_rate * FRAME_MS / 1000);
 
-    i2s_std_config_t std_cfg = {
-        .clk_cfg = I2S_STD_CLK_DEFAULT_CONFIG(SAMPLE_RATE),
-        .slot_cfg = I2S_STD_PHILIPS_SLOT_DEFAULT_CONFIG(
-            I2S_DATA_BIT_WIDTH_16BIT, I2S_SLOT_MODE_MONO),
-        .gpio_cfg = {
-            .mclk = I2S_GPIO_UNUSED,
-            .bclk = PIN_I2S_BCLK,
-            .ws = PIN_I2S_LRCK,
-            .dout = PIN_I2S_DOUT,
-            .din = PIN_I2S_DIN,
-            .invert_flags = {0},
-        },
-    };
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_tx, &std_cfg));
-    ESP_ERROR_CHECK(i2s_channel_init_std_mode(s_rx, &std_cfg));
-    ESP_ERROR_CHECK(i2s_channel_enable(s_tx));
-    ESP_ERROR_CHECK(i2s_channel_enable(s_rx));
+    s_tx = (i2s_chan_handle_t)bsp_audio_tx();
+    s_rx = (i2s_chan_handle_t)bsp_audio_rx();
 
-    ESP_LOGI(TAG, "音频就绪 %d Hz mono", SAMPLE_RATE);
+    if (!s_tx && !s_rx) {
+        ESP_LOGW(TAG, "此板无音频");
+        return;
+    }
+
+    ESP_LOGI(TAG, "音频就绪 %u Hz %s%s",
+             (unsigned)s_sample_rate,
+             s_rx ? "mic " : "", s_tx ? "speaker" : "");
 }
 
-/* ── 上行：麦克风采集线程 ── */
+/* ── 麦克风采集 ── */
 static void mic_task(void *arg)
 {
-    int16_t pcm[FRAME_SAMPLES];
+    int16_t *pcm = malloc(s_frame_samples * sizeof(int16_t) * 2);
+    size_t frame_bytes = s_frame_samples * sizeof(int16_t);
+
+    if (!pcm) {
+        ESP_LOGE(TAG, "麦克风缓冲分配失败");
+        vTaskDelete(NULL);
+        return;
+    }
 
     while (1) {
-        if (!s_mic_on) {
+        if (!s_mic_on || !s_rx) {
             vTaskDelay(pdMS_TO_TICKS(50));
             continue;
         }
-        size_t read = 0;
-        esp_err_t err = i2s_channel_read(s_rx, pcm, FRAME_BYTES, &read,
-                                         pdMS_TO_TICKS(60));
-        if (err != ESP_OK || read < FRAME_BYTES) continue;
 
-        /* TODO: 这里做 Opus 编码（libopus, 24kbps voip）
-         * 当前直接发 PCM 便于先联通；接上 opus 组件后改成编码后发送。
-         *    int n = opus_encode(enc, pcm, FRAME_SAMPLES, out, sizeof(out));
-         *    pet_send_bin(out, n);
+        size_t read = 0;
+        esp_err_t err = i2s_channel_read(s_rx, pcm, frame_bytes, &read,
+                                         pdMS_TO_TICKS(60));
+        if (err != ESP_OK || read < frame_bytes) continue;
+
+        /* TODO: Opus 编码（libopus, 24kbps voip）
+         * 当前直发 PCM 便于先联通链路：
+         *   int n = opus_encode(enc, pcm, s_frame_samples, out, sizeof(out));
+         *   pet_send_bin(out, n);
          */
-        pet_send_bin((const uint8_t *)pcm, FRAME_BYTES);
+        pet_send_bin((const uint8_t *)pcm, frame_bytes);
     }
 }
 
 void audio_start_mic(void)
 {
-    if (s_mic_on) return;
+    if (s_mic_on || !s_rx) return;
     s_mic_on = true;
     if (!s_mic_task) {
         xTaskCreatePinnedToCore(mic_task, "mic", 4096, NULL, 5, &s_mic_task, 1);
     }
 }
 
-void audio_stop_mic(void)
-{
-    s_mic_on = false;
-}
+void audio_stop_mic(void) { s_mic_on = false; }
 
-/* ── 下行：播放远端音频 ── */
+/* ── 播放 ── */
 void audio_play_opus(const uint8_t *opus, size_t len)
 {
     if (!s_tx || !len) return;
@@ -108,8 +104,8 @@ void audio_play_opus(const uint8_t *opus, size_t len)
     size_t written = 0;
     i2s_channel_write(s_tx, opus, len, &written, pdMS_TO_TICKS(200));
 
-    /* 粗略音量估算（驱动说话波形） */
-    int16_t *p = (int16_t *)opus;
+    /* 峰值估算，驱动说话波形 */
+    const int16_t *p = (const int16_t *)opus;
     int n = len / 2;
     if (n > 0) {
         int32_t peak = 0;
@@ -121,7 +117,4 @@ void audio_play_opus(const uint8_t *opus, size_t len)
     }
 }
 
-uint8_t audio_get_volume(void)
-{
-    return s_volume;
-}
+uint8_t audio_get_volume(void) { return s_volume; }
