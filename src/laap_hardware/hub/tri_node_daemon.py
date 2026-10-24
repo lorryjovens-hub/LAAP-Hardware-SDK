@@ -81,6 +81,8 @@ class DaemonConfig:
     enable_computer: bool = True
     enable_multistep: bool = True
     enable_journal: bool = True
+    enable_browser: bool = True
+    browser_headless: bool = True
 
     # 自动注册的能力
     auto_register: bool = True
@@ -139,6 +141,7 @@ class TriNodeDaemon:
         self.multistep = None
         self.journal = None
         self.link = None
+        self.browser_agent = None
 
         # ── 传输 ——
         self.transport = TransportManager(
@@ -249,6 +252,22 @@ class TriNodeDaemon:
             register_multistep_handlers(
                 self.hub, self.config.node_id, self.multistep,
             )
+
+        # 浏览器（网页感知/点击）——小智语音能"看网页、点网页"的关键
+        if self.config.enable_browser:
+            try:
+                from laaper.hub.browser_agent import (
+                    BrowserVoiceAgent, register_browser_handlers,
+                )
+                self.browser_agent = BrowserVoiceAgent(
+                    headless=self.config.browser_headless,
+                )
+                register_browser_handlers(
+                    self.hub, self.config.node_id, self.browser_agent,
+                )
+                logger.info(f"浏览器代理已启用 (headless={self.config.browser_headless})")
+            except Exception as e:
+                logger.warning(f"浏览器代理不可用: {e}")
 
     async def _connect_cloud(self) -> bool:
         """连云端中继，处理远端消息
@@ -483,10 +502,35 @@ class TriNodeDaemon:
                 pass
 
     async def _execute_action(self, action: str, params: Dict) -> Dict:
-        """执行电脑端动作"""
+        """执行电脑端动作
+
+        语音指令分流：
+          · 网页意图（打开/看网页/点网页上的X/搜索）→ BrowserVoiceAgent（DOM 精确）
+          · 其余桌面意图 → VoiceComputerAgent（pyautogui/UIA）
+        """
         # 语音指令（自然语言）优先走 voice_command
         if action in ("voice_command", "voice"):
             text = params.get("text", "")
+
+            # 网页意图判断：交给浏览器层。
+            # 浏览器已有页面时，交互类指令（点击/滚动/输入/回车）也优先走浏览器，
+            # 因为网页里的元素 UIA 拿不到，只能用 DOM。
+            use_browser = self.browser_agent and (
+                self._is_web_intent(text)
+                or (self.browser_agent.ready and self._is_browser_interaction(text))
+            )
+            if use_browser:
+                result = await self.browser_agent.handle(text)
+                return {
+                    "success": result.success,
+                    "reply": result.reply,
+                    "intent": result.intent or {},
+                    "action": (result.action_detail or {}).get("url", "")
+                        if result.action_detail and "url" in result.action_detail
+                        else (result.intent or {}).get("action", ""),
+                    "route": "browser",
+                }
+
             if self.voice_agent:
                 result = await self.voice_agent.handle(text)
                 return {
@@ -494,8 +538,18 @@ class TriNodeDaemon:
                     "reply": result.reply,
                     "intent": (result.intent or {}),
                     "action": (result.action_result or {}).get("action", ""),
+                    "route": "desktop",
                 }
             return {"success": False, "error": "语音能力未启用"}
+
+        # 明确的浏览器动作
+        if action in ("browser_command", "browser", "browser_see",
+                      "browser_open", "browser_click"):
+            if self.browser_agent:
+                return await self.hub.transport.execute(
+                    self.node_id, action, params
+                )
+            return {"success": False, "error": "浏览器能力未启用"}
 
         # 多步任务
         if action in ("computer_task", "task", "do"):
@@ -511,6 +565,57 @@ class TriNodeDaemon:
 
         # 具体动作 → 走电脑处理器
         return await self.hub.transport.execute(self.node_id, action, params)
+
+    @staticmethod
+    def _is_web_intent(text: str) -> bool:
+        """判断语音指令是否是网页意图（该走浏览器层）"""
+        t = text
+        tl = t.lower()
+
+        # 明确网址
+        if "http://" in tl or "https://" in tl or "www." in tl:
+            return True
+
+        # 网页/网站/浏览器/搜索 关键词
+        if any(k in t for k in (
+            "网页", "网站", "页面", "浏览器", "打开网", "看看有",
+            "搜索", "查一下", "找一下",
+        )):
+            return True
+
+        # 常见站点名 + 打开/上（bilibili/知乎/百度...）
+        known_sites = ("bilibili", "哔哩", "知乎", "百度", "淘宝", "京东",
+                       "抖音", "微博", "github", "小红书", "新浪", "网易")
+        if any(k in t for k in known_sites) and any(
+            k in t for k in ("打开", "访问", "去", "上", "搜")
+        ):
+            return True
+
+        # 明确是网页上的动作
+        if any(k in t for k in ("点网页", "网页上", "页面上", "网页里的")):
+            return True
+
+        return False
+
+    @staticmethod
+    def _is_browser_interaction(text: str) -> bool:
+        """交互类指令（浏览器有页面时优先走浏览器）：
+        点/滚/输/回车/搜、以及"点xx按钮"这类网页动作。"""
+        from laaper.hub.computer_use import VoiceIntentParser
+
+        # 规则层能拆出的交互动作
+        intent = VoiceIntentParser.parse(text)
+        if intent and intent.action in (
+            "click_text", "click", "scroll", "scroll_until",
+            "type", "press", "hotkey",
+        ):
+            return True
+
+        # 兜底关键词
+        return any(k in text for k in (
+            "点一下", "点击", "点开", "双击", "滚", "翻", "输入", "回车",
+            "搜索", "搜一下", "按下",
+        ))
 
     async def _handle_task_result(self, msg: MessageEnvelope):
         """远端节点执行完的返回"""
