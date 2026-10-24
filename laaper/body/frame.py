@@ -186,7 +186,9 @@ class LBPFrame:
             type=mtype, src=src, dst=dst, payload=payload, seq=seq,
             ttl=ttl, t_exec_us=t_exec,
             priority=Priority((fl >> 5) & 0x03),
-            flags=fl & 0xF0,
+            # 只保留 FRAGMENT(0x80) 与 ACK_REQ(0x10)。
+            # 不能用 0xF0 —— 那样会把优先级位 [6:5] 也当成 flags。
+            flags=fl & 0x90,
         )
 
     def describe(self) -> str:

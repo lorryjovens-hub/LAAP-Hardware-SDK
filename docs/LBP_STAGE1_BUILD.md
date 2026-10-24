@@ -235,17 +235,61 @@ ID2  ○         ID2  ○         ID2  ●─●
 
 ### 5.1 现状与缺口
 
-| 已有 | 位置 |
-|------|------|
-| LBP 帧层 / 枚举 / 拓扑 / 身体图式的 **Python 参考实现** | `laaper/body/` |
-| LDP 应用层 C 组件（WebSocket/队列/重连） | `esp32-projects/components/laap_core/` |
-| BSP 板级层 | `esp32-projects/components/bsp/` |
+| 已有 | 位置 | 状态 |
+|------|------|------|
+| LBP Python 参考实现（帧/载荷/拓扑/身体图式/IK） | `laaper/body/` | ✅ |
+| **LBP C 实现（帧/TP/载荷/从站/主站）** | `esp32-projects/components/lbp/` | ✅ 2977 行 |
+| LDP 应用层（WebSocket/队列/重连） | `esp32-projects/components/laap_core/` | ✅ |
+| BSP 板级层（5 块板） | `esp32-projects/components/bsp/` | ✅ |
 
-| 缺口 | 说明 |
-|------|------|
-| **LBP 的 C 实现** | 需照 `laaper/body/frame.py` + `topology.py` 移植，约 800–1200 行 |
-| **TWAI 驱动封装** | 收发 LBP 帧，中断 + 环形缓冲 |
-| **端口 ID 扫描** | 6 个端口的 GPIO 读取 + PRESENT# 中断 |
+| 剩余缺口 | 说明 |
+|----------|------|
+| **真机编译** | 本机无 IDF/gcc，C 代码未编译过（静态结构检查已过） |
+| 舵机驱动对接 | `on_cmd` 回调里接 LEDC PWM，代码骨架在宠物固件里 |
+| 电流检测 | 反射环需要 ADC 采电流，取决于驱动板 |
+| 同步线 1kHz 脉冲 | SYNC 引脚输出，需与其他节点对齐验证 |
+
+### 5.2 LBP C 组件怎么用
+
+```c
+#include "lbp.h"
+
+// 从站（ESP32-C3，一条腿）
+lbp_node_cfg_t cfg = {
+    .addr = CONFIG_LBP_NODE_ADDR,
+    .mount_port = CONFIG_LBP_MOUNT_PORT,
+    .bus = { .gpio_tx = CONFIG_LBP_CAN_TX_GPIO,
+             .gpio_rx = CONFIG_LBP_CAN_RX_GPIO,
+             .bitrate = CONFIG_LBP_BITRATE },
+    .on_cmd = on_cmd,               // 你的 PWM 执行
+    .on_safe_stop = on_stop,
+};
+lbp_fill_leg_3dof_bmd(&cfg.bmd, 0x1001);
+lbp_node_start(&node, &cfg);
+
+// 主站（ESP32-S3，躯干）
+lbp_master_init(&m, &bus_cfg);
+lbp_master_enumerate(&m, 1500);
+lbp_master_query_topology(&m, 0);
+lbp_master_print_topology(&m);
+char json[1024];
+lbp_master_topology_json(&m, json, sizeof(json));   // → 发给 PC
+```
+
+详见 `esp32-projects/components/lbp/README.md`。
+
+### 5.3 两侧对齐校验
+
+C 与 Python 必须产出完全相同的字节，否则固件和 PC 无法通信。
+而这种不一致极难发现：两边各自都能跑，只是解出来是垃圾。
+
+```bash
+python test_bmd_parity.py     # 53 项，真去解析 C 头文件做对比
+```
+
+已经靠它抓到过一个真实的缓冲区溢出：
+`LBP_BMD_FIXED_SIZE` 宏漏了 mass 的 4 字节，
+`encoded_size` 少算 4 → 长度检查通过但越界写 4 字节。
 
 ### 5.2 spine 跑什么
 

@@ -26,11 +26,32 @@ This file is part of LAAP Hardware SDK, GPL v3.
 from __future__ import annotations
 
 import json
+import struct
 from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Dict, List, Optional, Tuple
 
 Vec3 = Tuple[float, float, float]
+
+# ══════════════════════════════════════════════════════════
+#  二进制 BMD 尺寸常量
+#
+#  必须与 esp32-projects/components/lbp/include/lbp_payload.h 一致。
+#  tests/test_bmd_parity.py 会真的去解析 C 头文件做对比。
+# ══════════════════════════════════════════════════════════
+
+BMD_JOINT_SIZE = 68
+BMD_PORT_SIZE = 25
+BMD_NAME_LEN = 32
+BMD_FIXED_SIZE = 89
+"""固定部分：magic4 + ver2 + cls1 + role1 + vid2 + pid2 + serial8
++ dof1 + port_count1 + mass4 + com12 + payload4 + reach4
++ bus1 + addr1 + power2 + peak2 + caps4 + hw_ts1 + name32 = 89"""
+
+
+def bmd_binary_size(dof: int, port_count: int) -> int:
+    return (BMD_FIXED_SIZE + dof * BMD_JOINT_SIZE
+            + port_count * BMD_PORT_SIZE)
 
 
 # ══════════════════════════════════════════════════════════
@@ -217,6 +238,132 @@ class ModuleDescriptor:
 
     def to_json(self) -> str:
         return json.dumps(self.to_dict(), separators=(",", ":"))
+
+    # ══════════════════════════════════════════════════════
+    #  二进制序列化（与 C 实现 lbp_bmd_encode 逐字节对齐）
+    # ══════════════════════════════════════════════════════
+
+    def to_bytes(self) -> bytes:
+        """紧凑二进制 BMD（318 字节 @ 3DOF，比 JSON 663B 少一半）
+
+        布局见 lbp_payload.h。C 侧的 lbp_bmd_encode 产出完全相同的字节。
+        """
+        out = bytearray()
+        out += b"LBMD"
+        out += bytes([self.ver_major if hasattr(self, "ver_major") else 1,
+                      0,
+                      int(self.cls), int(self.role)])
+        out += struct.pack("<HH", self.vendor_id, self.product_id)
+        out += struct.pack("<Q", self.serial & 0xFFFFFFFFFFFFFFFF)
+        out += bytes([self.dof])
+
+        for j in self.joints:
+            nm = j.name.encode("utf-8")[:15]
+            out += nm + b"\x00" * (16 - len(nm))
+            out += struct.pack("<3f", *j.axis)
+            out += struct.pack("<4f", j.min_rad, j.max_rad,
+                               j.max_vel_rad_s, j.max_torque_nm)
+            out += struct.pack("<3f", *j.offset)
+            out += struct.pack("<3f", *j.link)
+
+        out += bytes([len(self.ports)])
+        for p in self.ports:
+            out += bytes([p.pos_id])
+            out += struct.pack("<3f", *p.normal)
+            out += struct.pack("<3f", *p.offset)
+
+        out += struct.pack("<f", self.mass_kg)
+        out += struct.pack("<3f", *self.com_offset)
+        out += struct.pack("<f", self.payload_kg)
+        out += struct.pack("<f", self.reach_m)
+        out += bytes([int(self.bus_profile), self.bus_addr & 0xFF])
+        out += struct.pack("<HH", self.power_mw, self.power_peak_mw)
+        out += struct.pack("<I", self.capability_bits)
+        out += bytes([1 if self.hw_timestamp else 0])
+
+        nm = self.name.encode("utf-8")[:BMD_NAME_LEN - 1]
+        out += nm + b"\x00" * (BMD_NAME_LEN - len(nm))
+
+        return bytes(out)
+
+    @property
+    def capability_bits(self) -> int:
+        """能力位掩码（与 C 的 caps 字段一致）"""
+        v = 0
+        for c in self.capabilities:
+            v |= int(c)
+        return v
+
+    @classmethod
+    def from_bytes(cls, data: bytes) -> "ModuleDescriptor":
+        if len(data) < BMD_FIXED_SIZE:
+            raise ValueError(f"BMD 太短: {len(data)} < {BMD_FIXED_SIZE}")
+        if data[:4] != b"LBMD":
+            raise ValueError(f"BMD magic 错误: {data[:4]!r}")
+
+        off = 4
+        ver_major = data[off]; off += 1
+        ver_minor = data[off]; off += 1
+        mcls = data[off]; off += 1
+        role = data[off]; off += 1
+        vid, pid = struct.unpack_from("<HH", data, off); off += 4
+        (serial,) = struct.unpack_from("<Q", data, off); off += 8
+        dof = data[off]; off += 1
+
+        joints = []
+        for _ in range(dof):
+            nm = data[off:off + 16].split(b"\x00")[0].decode("utf-8", "replace")
+            off += 16
+            axis = struct.unpack_from("<3f", data, off); off += 12
+            lo, hi, vel, tq = struct.unpack_from("<4f", data, off); off += 16
+            offset = struct.unpack_from("<3f", data, off); off += 12
+            link = struct.unpack_from("<3f", data, off); off += 12
+            joints.append(JointSpec(nm, axis, lo, hi, vel, tq, offset, link))
+
+        port_count = data[off]; off += 1
+        ports = []
+        for _ in range(port_count):
+            pid_ = data[off]; off += 1
+            normal = struct.unpack_from("<3f", data, off); off += 12
+            poff = struct.unpack_from("<3f", data, off); off += 12
+            ports.append(Port(pid_, normal, poff))
+
+        (mass,) = struct.unpack_from("<f", data, off); off += 4
+        com = struct.unpack_from("<3f", data, off); off += 12
+        (payload,) = struct.unpack_from("<f", data, off); off += 4
+        (reach,) = struct.unpack_from("<f", data, off); off += 4
+        bus_profile = data[off]; off += 1
+        bus_addr = data[off]; off += 1
+        power, peak = struct.unpack_from("<HH", data, off); off += 4
+        (caps,) = struct.unpack_from("<I", data, off); off += 4
+        hw_ts = data[off]; off += 1
+        name = data[off:off + BMD_NAME_LEN].split(b"\x00")[0].decode("utf-8", "replace")
+
+        caps_list = [Capability(c) for c in Capability if (caps & int(c))]
+
+        m = cls(
+            name=name,
+            cls=ModuleClass(mcls),
+            role=ModuleRole(role),
+            vendor_id=vid,
+            product_id=pid,
+            serial=serial,
+            joints=joints,
+            ports=ports,
+            mass_kg=mass,
+            com_offset=com,
+            payload_kg=payload,
+            reach_m=reach,
+            bus_profile=BusProfile(bus_profile) if bus_profile else BusProfile.CAN,
+            bus_addr=bus_addr,
+            power_mw=power,
+            power_peak_mw=peak,
+            capabilities=caps_list,
+            hw_timestamp=bool(hw_ts),
+        )
+        m.ver_major = ver_major
+        m.ver_minor = ver_minor
+        return m
 
     @classmethod
     def from_dict(cls, d: dict) -> "ModuleDescriptor":

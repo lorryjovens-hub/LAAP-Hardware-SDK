@@ -26,6 +26,7 @@ esp32-projects/
 │   │   ├── bsp_base.c           通用层 + 弱默认实现
 │   │   ├── bsp_common.c         SPI LCD / 舵机 / I2S / ADC 公共实现
 │   │   └── boards/              s3_round_gc9a01 / s3_korvo2 / s3_eye / p4_lcd / generic
+│   ├── lbp/                     ★ LBP/1.0 C 实现（帧/TP/载荷/从站/主站）
 │   └── laap_core/               ★ C 组件：协议/传输/队列，四个项目共用
 │       ├── include/             laap_core.h · protocol · transport · task · types
 │       ├── laap_protocol.c      LDP 编解码（不依赖 IDF，PC 可测）

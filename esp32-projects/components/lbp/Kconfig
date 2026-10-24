@@ -1,0 +1,30 @@
+menu "LAAP LBP"
+
+    config LBP_CAN_TX_GPIO
+        int "TWAI TX GPIO"
+        default 4
+        help
+          CAN 收发器 TJA1050 的 TXD 接这个脚。
+
+    config LBP_CAN_RX_GPIO
+        int "TWAI RX GPIO"
+        default 5
+
+    config LBP_BITRATE
+        int "CAN bitrate (bps)"
+        default 1000000
+        help
+          ESP32 TWAI 只支持 CAN 2.0B，最高 1 Mbps。
+          需要 CAN FD 必须外挂 MCP2518FD（SPI 接）。
+
+    config LBP_NODE_ADDR
+        int "本节点 CAN 地址（从站模式）"
+        default 16
+        range 2 254
+
+    config LBP_MOUNT_PORT
+        int "本节点挂载端口（0-7，从 ID 线读）"
+        default 0
+        range 0 7
+
+endmenu
