@@ -1,0 +1,19 @@
+menu "LAAP Pet"
+
+    config PET_WIFI_SSID
+        string "WiFi SSID"
+        default "LAAP-Office"
+
+    config PET_WIFI_PASS
+        string "WiFi Password"
+        default "laap2026"
+
+    config PET_WS_HOST
+        string "LAAP host (电脑 IP)"
+        default "192.168.1.100"
+
+    config PET_WS_PORT
+        int "LAAP port"
+        default 8765
+
+endmenu

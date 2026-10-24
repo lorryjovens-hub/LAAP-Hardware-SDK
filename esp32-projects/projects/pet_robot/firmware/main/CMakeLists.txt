@@ -1,0 +1,21 @@
+idf_component_register(
+    SRCS
+        "main.c"
+        "display.c"
+        "motion.c"
+        "audio.c"
+        "touch.c"
+        "network.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        esp_wifi
+        esp_event
+        esp_netif
+        nvs_flash
+        esp_websocket_client
+        esp_lcd
+        esp_lvgl_port
+        lvgl
+        driver
+        json
+)

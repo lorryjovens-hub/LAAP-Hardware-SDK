@@ -12,15 +12,19 @@ esp32-projects/
 ├── README.md                    本文件（总览 + 工作流）
 ├── docs/
 │   ├── RESEARCH.md              ★ 开源项目深度调研（对话/运控/步态/差速）
+│   ├── HARDWARE_SELECTION_2026.md ★ 芯片选型 + 数字生命体分层架构
 │   ├── LDP_PROTOCOL.md          统一接入协议规范
 │   └── WORKFLOW.md              从零到一台能跑的机器人的完整工作流
+├── scaffold/
+│   └── laap_hw.py               ★ 脚手架：一条命令生成完整 IDF 工程
 ├── sdk/
 │   └── laap_esp32/              ★ LAAP ESP32 统一 SDK（Python 参考实现）
 │       ├── protocol.py          LDP 协议（注册/感知/运动/对话）
 │       ├── motion.py            运动抽象（差速/四足/云台）
 │       └── gait.py              四足 IK + 步态（trot/walk/pace）
 ├── projects/
-│   ├── pet_robot/               ① 桌面宠物（圆屏表情 + 云台 + 语音）
+│   ├── pet_robot/               ① 桌面宠物（圆屏表情 + 云台 + 语音）★ 固件完整
+│   │   └── firmware/main/       display/motion/audio/touch/network/main
 │   ├── robot_car/               ② 机器车（差速 + 编码器 PID + 超声）
 │   ├── robot_dog/               ③ 机械狗（12 舵机 IK + 三种步态）
 │   └── desktop_bot/             ④ 桌面机器人（宠物 + 车 合体）
@@ -28,6 +32,43 @@ esp32-projects/
     ├── sdk_selftest.py          SDK 全量自检
     ├── fk_verify.py             ★ 正运动学反验 IK（0.00mm 误差）
     └── gait_animate.py          步态可视化（导出动画帧）
+```
+
+---
+
+## 脚手架：一条命令起工程
+
+```bash
+# 列出模板
+python scaffold/laap_hw.py list
+
+# 生成桌面宠物工程（含全部固件源文件 + 引脚头 + 构建配置）
+python scaffold/laap_hw.py new pet --name my-pet --out ./my-pet
+
+# 生成机器狗 / 机器车 / 桌面机器人
+python scaffold/laap_hw.py new dog --name my-dog
+
+# 检查工程完整性（缺文件/缺 app_main/引脚未定义都会报）
+python scaffold/laap_hw.py doctor ./my-pet
+```
+
+生成的工程结构：
+
+```
+my-pet/
+├── CMakeLists.txt
+├── sdkconfig.defaults        目标芯片 + PSRAM + LVGL 配置
+├── README.md                 构建步骤
+└── main/
+    ├── CMakeLists.txt
+    ├── Kconfig.projbuild     WiFi SSID / LAAP host 配置项
+    ├── laap_pins.h           ★ 引脚映射（换板只改这个文件）
+    ├── main.c                WiFi + WS + LDP 消息循环 + 主控制循环
+    ├── display.c/h           GC9A01 圆屏 + LVGL 眼睛表情
+    ├── motion.c/h            双舵机云台 + 一阶低通平滑
+    ├── audio.c/h             I2S 麦克风/功放
+    ├── touch.c/h             TTP223 触摸（摸头反应）
+    └── network.c/h           WiFi STA + 自动重连
 ```
 
 ---
@@ -177,12 +218,20 @@ projects/pet_robot/firmware/main/
 
 ## 硬件选型速查
 
+> 完整选型指南（含芯片对比、P4 无 WiFi 陷阱、数字生命体分层架构）：
+> **[docs/HARDWARE_SELECTION_2026.md](docs/HARDWARE_SELECTION_2026.md)**
+
 | 类型 | 主控 | 关键外设 | 预算 |
 |------|------|---------|------|
-| 桌面宠物 | ESP32-S3 | GC9A01 圆屏 + 2×SG90 + INMP441 麦 + MAX98357 功放 | ¥120 |
+| 桌面宠物 | ESP32-S3 (N16R8) | GC9A01 圆屏 + 2×SG90 + INMP441 麦 + MAX98357 功放 | ¥120 |
 | 机器车 | ESP32-S3 | 2×N20 电机+编码器 + MPU6050 + HC-SR04 | ¥150 |
 | 机械狗 | ESP32-S3 | 12×MG90S/SG90 + PCA9685 + MPU6050 | ¥400 |
-| 桌面机器人 | ESP32-P4/S3 | 宠物+车 合体 + MIPI-DSI 屏 | ¥500 |
+| 桌面机器人 | ESP32-P4 + C6 | 宠物+车 合体 + MIPI-DSI 屏 | ¥500 |
+
+**三个必知陷阱：**
+1. **ESP32-P4 没有 WiFi/蓝牙**，必须外挂 ESP32-C6 模组
+2. **S3 必须买 8MB PSRAM 版**（N16R8），2MB 版跑不动 LVGL
+3. 音频用 **I2S 数字麦/功放**（INMP441 + MAX98357），别用模拟
 
 ---
 
@@ -211,7 +260,13 @@ projects/pet_robot/firmware/main/
 | SDK 算法（IK/步态/运动学/协议） | ✅ 已实现 + 自检通过 + FK 反验 0.00mm |
 | 调研报告（四类开源、对话/运控算法） | ✅ 完成 |
 | LDP 协议 | ✅ 实现 + 自检 |
-| 各项目固件骨架 | 🟡 代码就位，**需真硬件编译联调** |
+| 脚手架 `laap_hw.py` | ✅ 生成 + doctor 实测通过（16 文件） |
+| 桌面宠物固件 | ✅ 完整骨架（眼睛表情/云台/音频/触摸/协议全实现） |
+| 芯片选型指南 | ✅ docs/HARDWARE_SELECTION_2026.md |
+| **C 语言公共组件 `laap_core`** | ⚠️ **缺**（协议/算法目前在 Python，固件侧需复制） |
+| **BSP 板级支持包** | ⚠️ **缺**（换板需改引脚宏，未抽成 bsp_<board>） |
+| 各项目真机编译联调 | 🟡 代码就位，**未在真板跑过** |
+| 固件侧 libopus | 🟡 音频当前 PCM 直通，未接 Opus 编码 |
 | 真机标定 | ⚪ 需实际舵机/电机 |
 | RL 步态（MuJoCo sim2real） | ⚪ 待深入 |
 
