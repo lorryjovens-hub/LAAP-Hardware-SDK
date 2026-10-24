@@ -13,6 +13,7 @@ esp32-projects/
 ├── docs/
 │   ├── RESEARCH.md              ★ 开源项目深度调研（对话/运控/步态/差速）
 │   ├── HARDWARE_SELECTION_2026.md ★ 芯片选型 + 数字生命体分层架构
+│   ├── LBP_PROTOCOL_SPEC.md     ★ LBP/1.0 身体协议规范（物理层→身体层）
 │   ├── LDP_PROTOCOL.md          统一接入协议规范
 │   └── WORKFLOW.md              从零到一台能跑的机器人的完整工作流
 ├── scaffold/

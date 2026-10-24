@@ -57,6 +57,28 @@ from laaper.devices.digital_life import (
     ProcessingUnit,
 )
 
+# ── LBP/1.0 身体协议（物理地面）──
+# 协议层：帧 / 模块自描述 / 拓扑 / 身体图式 / 变形
+from laaper.body.frame import (
+    LBPFrame, MsgType, Priority, Flags,
+    Fragmenter, PriorityQueue, ClockSync, bandwidth_estimate,
+)
+from laaper.body.module import (
+    ModuleDescriptor, JointSpec, Port,
+    ModuleClass, ModuleRole, Capability, BusProfile,
+    make_module, MODULE_LIBRARY,
+)
+from laaper.body.topology import (
+    Topology, BodySchema, KinematicChain, derive_schema,
+)
+from laaper.body.kinematics import (
+    ik_generic, ik_dls, stability_margin, convex_hull_2d,
+)
+from laaper.body.morphing import (
+    assemble_quadruped, assemble_biped_arm, assemble_wheeled,
+    MorphEngine, power_summary,
+)
+
 __all__ = [
     # 核心
     "ConsciousnessFrame",
@@ -110,4 +132,15 @@ __all__ = [
     "DigitalLifeHardware",
     "PowerSystem",
     "ProcessingUnit",
+
+    # ── LBP 身体协议 ──
+    "LBPFrame", "MsgType", "Priority", "Flags",
+    "Fragmenter", "PriorityQueue", "ClockSync", "bandwidth_estimate",
+    "ModuleDescriptor", "JointSpec", "Port",
+    "ModuleClass", "ModuleRole", "Capability", "BusProfile",
+    "make_module", "MODULE_LIBRARY",
+    "Topology", "BodySchema", "KinematicChain", "derive_schema",
+    "ik_generic", "ik_dls", "stability_margin", "convex_hull_2d",
+    "assemble_quadruped", "assemble_biped_arm", "assemble_wheeled",
+    "MorphEngine", "power_summary",
 ]
