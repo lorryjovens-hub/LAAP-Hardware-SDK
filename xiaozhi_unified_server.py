@@ -3,10 +3,13 @@ xiaozhi_unified_server.py — 一台小智硬件挂 47 个工具
 
 生产版 36 + LAAP-Agent-Kit 13，冲突的 2 个用语义合并。
 
-定案（可改）：
-  范围   全开 36 + 13 = 47
-  冲突   pc_status / pc_windows → 一个工具同时报「LAAP 健康」与「本机状态」
-  理由   用户选的是「两套合并、能力最全」，全开 + 语义合并是它的字面含义
+定案（用户 2026-10-28 选定）：
+  范围   全开 36 + 13 = 49
+  冲突   pc_status / pc_windows → **全部改名去冲突**，各自独立命名
+         生产版 pc_status  → laap_pc_status
+         kit 版  pc_status  → kit_pc_status
+         （pc_windows 同理）
+  理由   名字完全独立，不会误解、不会串台，代价只是长一点
 
 用法：
   python xiaozhi_unified_server.py --token <wss url 或裸 JWT>
@@ -62,14 +65,14 @@ def make_dispatch(result: MergeResult) -> Dict[str, Any]:
 async def run(token_url: str, node_id: str = "xiaozhi-unified",
               serve: bool = True) -> int:
     print("=" * 64)
-    print("  LAAP 小智统一服务 · 47 工具")
+    print("  LAAP 小智统一服务 · 49 工具（全部独立命名）")
     print("=" * 64)
 
     print("\n[1/4] 合并工具集")
-    result = build_merged_tools(CollisionStrategy.MERGE_SEMANTIC)
+    result = build_merged_tools(CollisionStrategy.ALL_RENAME)
     print(f"      生产版 {result.prod_count} + kit {result.kit_count}"
           f" → 合并后 {result.count} 个")
-    print(f"      语义合并: {['pc_status', 'pc_windows']}")
+    print("      冲突改名: pc_status/pc_windows → laap_* 与 kit_* 各自独立")
     if result.warnings:
         for w in result.warnings[:6]:
             print(f"      ⚠ {w}")
@@ -108,7 +111,8 @@ async def run(token_url: str, node_id: str = "xiaozhi-unified",
 
     # 抽查几个 handler 真能跑
     print("\n      抽查处理器（本地直调，不经 broker）:")
-    for probe in ("pc_status", "laap_status", "pc_windows"):
+    # all_rename 下的真名：冲突项带前缀，非冲突项保持原名
+    for probe in ("laap_pc_status", "kit_pc_windows", "laap_status", "laap_pc_windows"):
         if probe in dispatch:
             t0 = time.time()
             try:
